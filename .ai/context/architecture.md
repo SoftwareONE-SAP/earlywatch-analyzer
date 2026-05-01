@@ -1,0 +1,92 @@
+# Architecture
+
+**Project:** EWA Analyzer Azure Migration Minimal Clone  
+**Initialized:** 2026-05-01
+
+## Overview
+
+This repository contains the runtime, frontend, and deployment assets for the EWA Analyzer application. The backend is a stateless FastAPI service that stores artifacts in Azure Blob Storage, while the SAPUI5 frontend calls backend API endpoints for analysis and export flows. The repo also keeps BTP deployment files and Azure migration documentation so the application can be deployed in either environment.
+
+## Tech Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Language | Python | 3.12 |
+| Language | JavaScript | Node.js ecosystem |
+| Runtime | Python | 3.12 |
+| Runtime | Node.js | 20+ |
+| Protocol/Framework | FastAPI | 0.115.12+ |
+| Protocol/Framework | SAPUI5 | current project setup |
+| Storage | Azure Blob Storage | SDK-based |
+| AI SDKs | OpenAI, Anthropic, Google GenAI | current project setup |
+| Document/Export | openpyxl, PyMuPDF, python-docx | current project setup |
+
+## Directory Structure
+
+```
+.
+├── README.md
+├── docker-compose.yml
+├── mta.yaml
+├── mtaext.example.yaml
+├── xs-security.json
+├── .github/
+│   ├── copilot-instructions.md
+│   └── workflows/
+├── backend/
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── ewa_main.py
+│   ├── workflow_orchestrator.py
+│   ├── agent/
+│   ├── converters/
+│   ├── core/
+│   ├── ewa_pipeline/
+│   ├── models/
+│   ├── pageindex/
+│   ├── prompts/
+│   ├── routers/
+│   ├── schemas/
+│   ├── services/
+│   ├── skills/
+│   └── utils/
+├── docs/
+│   ├── AZURE_MIGRATION_GUIDE.md
+│   └── RUNTIME_ARCHITECTURE.md
+├── sapui5/
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── package.json
+│   └── webapp/
+├── approuter/
+│   ├── package.json
+│   └── xs-app.json
+├── ui-deployer/
+│   └── package.json
+└── scripts/
+    └── deploy-local-btp.ps1
+```
+
+## Key Components
+
+| File / Module | Responsibility |
+|--------------|----------------|
+| `backend/ewa_main.py` | Backend application entry point. |
+| `backend/workflow_orchestrator.py` | Orchestrates workflow execution. |
+| `backend/ewa_pipeline/` | Structured pipeline for indexing, analysis, reporting, tracking, and orchestration. |
+| `backend/core/azure_clients.py` | Azure client setup and service wiring. |
+| `backend/core/runtime_config.py` | Runtime configuration loading. |
+| `backend/routers/` | API routes for health, auth, storage, export, chat, and AI operations. |
+| `backend/utils/excel_workbook_builder.py` | Workbook generation helpers. |
+| `backend/utils/ewa_dispatcher.py` | Dispatch logic for EWA processing. |
+| `sapui5/webapp/` | SAPUI5 frontend application source. |
+| `docs/AZURE_MIGRATION_GUIDE.md` | Azure migration runbook. |
+| `docs/RUNTIME_ARCHITECTURE.md` | Runtime shape and environment variable reference. |
+| `mta.yaml` | BTP deployment descriptor. |
+| `xs-security.json` | XSUAA security model. |
+
+## Decision Log
+
+| Date | Decision | Rationale | Alternatives Considered |
+|------|----------|-----------|------------------------|
+| 2026-05-01 | Initial memory system setup | Consistent session handoffs | None |

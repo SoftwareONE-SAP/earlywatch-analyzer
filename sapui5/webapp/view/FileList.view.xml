@@ -1,0 +1,247 @@
+<mvc:View
+    controllerName="ewa.analyzer.controller.FileList"
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns="sap.m"
+    xmlns:u="sap.ui.unified"
+    xmlns:l="sap.ui.layout"
+    xmlns:f="sap.f"
+    xmlns:core="sap.ui.core"
+    core:require="{
+        DateType: 'sap/ui/model/type/Date'
+    }">
+    <Page title="{i18n>fileListTitle}" backgroundDesign="Transparent">
+        <content>
+            <!-- Grey Background Container -->
+            <!-- White Centered Content -->
+            <VBox class="paperSheet fileListSheet sapUiSizeCompact">
+            <!-- Upload Area -->
+            <Panel
+                headerText="{i18n>uploadTitle}"
+                expandable="true"
+                expanded="{uploadPanel>/expanded}"
+                class="uploadPanel"
+                width="auto">
+                    <content>
+                        <VBox class="uploadArea">
+                            <HBox justifyContent="SpaceBetween" alignItems="Center" wrap="Wrap" width="100%" class="sapUiTinyMarginBottom">
+                                <u:FileUploader
+                                    id="fileUploader"
+                                    name="file"
+                                    multiple="true"
+                                    tooltip="Upload your file to the local server"
+                                    uploadComplete=".onUploadComplete"
+                                    change=".onFileChange"
+                                    typeMissmatch=".handleTypeMissmatch"
+                                    style="Emphasized"
+                                    fileType="zip"
+                                    width="22rem"
+                                    placeholder="Choose ZIP file..."
+                                    class="sapUiSmallMarginEnd"/>
+                                <Button text="{i18n>uploadButton}" type="Emphasized" press=".onUploadPress" icon="sap-icon://upload"/>
+                            </HBox>
+                            <Table
+                                id="uploadQueueTable"
+                                items="{uploadQueue>/files}"
+                                visible="{= ${uploadQueue>/files}.length > 0 }"
+                                width="100%">
+                                <headerToolbar>
+                                    <OverflowToolbar class="uploadQueueToolbar" design="Transparent">
+                                        <Title text="Selected files (set customer per file)" level="H3"/>
+                                    </OverflowToolbar>
+                                </headerToolbar>
+                                <columns>
+                                    <Column>
+                                        <Text text="File"/>
+                                    </Column>
+                                    <Column hAlign="End">
+                                        <Text text="Size (bytes)"/>
+                                    </Column>
+                                    <Column hAlign="Begin">
+                                        <Text text="Customer"/>
+                                    </Column>
+                                    <Column hAlign="Begin" width="100px">
+                                        <Text text="SID"/>
+                                    </Column>
+                                    <Column hAlign="Begin" width="150px">
+                                        <Text text="Start Date"/>
+                                    </Column>
+                                    <Column hAlign="Begin" width="150px">
+                                        <Text text="End Date"/>
+                                    </Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem vAlign="Middle">
+                                        <cells>
+                                            <ObjectIdentifier title="{uploadQueue>name}"/>
+                                            <Text text="{uploadQueue>size}"/>
+                                            <Select
+                                                selectedKey="{uploadQueue>customer}"
+                                                change=".onUploadQueueCustomerChange"
+                                                width="150px"
+                                                forceSelection="true"
+                                                items="{uploadCustomers>/customers}">
+                                                <core:Item key="{uploadCustomers>key}" text="{uploadCustomers>text}"/>
+                                            </Select>
+                                            <Input 
+                                                value="{uploadQueue>sid}" 
+                                                maxLength="3" 
+                                                placeholder="SID"
+                                                liveChange=".onSIDLiveChange"
+                                                width="100%"/>
+                                            <DatePicker
+                                                value="{
+                                                    path: 'uploadQueue>startDate',
+                                                    type: 'sap.ui.model.type.Date',
+                                                    formatOptions: {pattern: 'yyyy-MM-dd', strictParsing: true}
+                                                }"
+                                                valueFormat="yyyy-MM-dd"
+                                                displayFormat="yyyy-MM-dd"
+                                                placeholder="Start Date"
+                                                width="100%"/>
+                                            <DatePicker
+                                                value="{
+                                                    path: 'uploadQueue>endDate',
+                                                    type: 'sap.ui.model.type.Date',
+                                                    formatOptions: {pattern: 'yyyy-MM-dd', strictParsing: true}
+                                                }"
+                                                valueFormat="yyyy-MM-dd"
+                                                displayFormat="yyyy-MM-dd"
+                                                placeholder="End Date"
+                                                width="100%"/>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </VBox>
+                    </content>
+                </Panel>
+
+                <!-- File List Table -->
+                <Table
+                    id="filesTable"
+                    class="sapUiSmallMarginTop"
+                    items="{
+                        path: 'files>/',
+                        sorter: [{
+                            path: 'customer',
+                            group: true
+                        }]
+                    }"
+                    mode="MultiSelect"
+                    growing="true"
+                    growingThreshold="20"
+                    width="100%"
+                    sticky="HeaderToolbar,ColumnHeaders"
+                    selectionChange=".onSelectionChange">
+                    <headerToolbar>
+                        <OverflowToolbar class="fileListToolbar" design="Transparent">
+                            <Title text="Files ({= ${files>/}.length })" level="H2"/>
+                            <ToolbarSpacer/>
+                            <Label text="Filter:" labelFor="customerFilter" class="sapUiTinyMarginEnd"/>
+                            <Select
+                                id="customerFilter"
+                                forceSelection="true"
+                                change=".onFilterChange"
+                                items="{customers>/customers}"
+                                selectedKey="{view>/selectedCustomer}"
+                                width="200px"
+                                class="sapUiSmallMarginEnd">
+                                <core:Item key="{customers>key}" text="{customers>text}"/>
+                            </Select>
+                            <Select
+                                id="yearFilter"
+                                forceSelection="true"
+                                change=".onFilterChange"
+                                items="{years>/years}"
+                                selectedKey="{view>/selectedYear}"
+                                width="150px"
+                                class="sapUiSmallMarginEnd">
+                                <core:Item key="{years>key}" text="{years>text}"/>
+                            </Select>
+                            <Select
+                                id="monthFilter"
+                                forceSelection="true"
+                                change=".onFilterChange"
+                                items="{months>/months}"
+                                selectedKey="{view>/selectedMonth}"
+                                width="150px"
+                                class="sapUiSmallMarginEnd">
+                                <core:Item key="{months>key}" text="{months>text}"/>
+                            </Select>
+                            <ToolbarSeparator/>
+                            <Button text="{i18n>process}" icon="sap-icon://activate" press=".onBatchProcessPress" type="Accept" enabled="{= ${selectedFiles>/count} > 0 }"/>
+                            <Button text="{i18n>delete}" press=".onBatchDeletePress" type="Reject" icon="sap-icon://delete" enabled="{= ${selectedFiles>/count} > 0 }"/>
+                            <Button icon="sap-icon://refresh" tooltip="Refresh" type="Transparent" press=".onRefreshFiles"/>
+                        </OverflowToolbar>
+                    </headerToolbar>
+                    <columns>
+                        <Column>
+                            <Text text="{i18n>fileName}"/>
+                        </Column>
+                        <Column minScreenWidth="Tablet" demandPopin="true">
+                            <Text text="{i18n>status}"/>
+                        </Column>
+                        <Column minScreenWidth="Desktop" demandPopin="true" hAlign="End">
+                            <Text text="{i18n>uploadDate}"/>
+                        </Column>
+                        <Column minScreenWidth="Desktop" demandPopin="true" hAlign="End">
+                            <Text text="{i18n>reportDate}"/>
+                        </Column>
+                        <Column hAlign="End">
+                            <Text text="{i18n>actions}"/>
+                        </Column>
+                    </columns>
+                    <items>
+                        <ColumnListItem vAlign="Middle">
+                            <cells>
+                                <ObjectIdentifier title="{files>name}"/>
+                                <ObjectStatus
+                                    text="{files>statusText}"
+                                    tooltip="{= ${files>statusMessage} || ${files>statusHint} || ${files>statusText} }"
+                                    inverted="true"
+                                    state="{path: 'files>status', formatter: '.formatter.statusState'}"
+                                    icon="{path: 'files>status', formatter: '.formatter.statusIcon'}"/>
+                                <Text text="{path: 'files>uploadDate', type: 'DateType', formatOptions: { style: 'medium' }}"/>
+                                <Text text="{path: 'files>reportDate', type: 'DateType', formatOptions: { style: 'medium' }}"/>
+                                <HBox
+                                    class="actionsContainer"
+                                    height="100%"
+                                    justifyContent="End"
+                                    alignItems="Center"
+                                    visible="{= ${files>status} ? ${files>status}.toLowerCase() !== 'processing' : true }">
+                                    <Button
+                                        text="{i18n>viewAnalysis}"
+                                        icon="sap-icon://show"
+                                        type="Transparent"
+                                        press=".onViewAnalysisPress"
+                                        visible="false"/>
+                                    <Button
+                                        tooltip="{i18n>chatTitle}"
+                                        icon="sap-icon://discussion"
+                                        type="Transparent"
+                                        press=".onChatPress"
+                                        class="sapUiTinyMarginBegin"
+                                        visible="{= ${files>status} === 'Analyzed' || ${files>status} === 'completed' }"/>
+                                    <Button
+                                        tooltip="Download Excel Report"
+                                        icon="sap-icon://excel-attachment"
+                                        type="Transparent"
+                                        press=".onDownloadExcelPress"
+                                        class="sapUiTinyMarginBegin"
+                                        visible="{= ${files>status} === 'Analyzed' || ${files>status} === 'completed' }"/>
+                                    <Button
+                                        tooltip="{i18n>process}"
+                                        icon="sap-icon://activate"
+                                        type="Transparent"
+                                        press=".onProcessPress"
+                                        class="sapUiTinyMarginBegin"
+                                        visible="{= ${files>status} ? ${files>status}.toLowerCase() !== 'processed' &amp;&amp; ${files>status}.toLowerCase() !== 'analyzed' &amp;&amp; ${files>status}.toLowerCase() !== 'completed' &amp;&amp; ${files>status}.toLowerCase() !== 'processing' : true }"/>
+                                </HBox>
+                            </cells>
+                        </ColumnListItem>
+                    </items>
+                </Table>
+            </VBox>
+        </content>
+    </Page>
+</mvc:View>

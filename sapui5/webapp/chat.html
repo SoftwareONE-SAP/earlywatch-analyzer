@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EWA Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep:       #0c1222;
+      --bg-mid:        #111a2e;
+      --bg-surface:    #162033;
+      --bg-card:       #1a2740;
+      --bg-elevated:   #1f2f4a;
+      --bg-hover:      #243654;
+      --accent:        #3b82f6;
+      --accent-glow:   rgba(59, 130, 246, 0.3);
+      --accent-warm:   #f59e0b;
+      --text:          #e8ecf4;
+      --text-secondary: #94a3b8;
+      --text-muted:    #64748b;
+      --border:        rgba(148, 163, 184, 0.12);
+      --border-accent: rgba(59, 130, 246, 0.25);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-deep);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+    .card {
+      background: var(--bg-surface);
+      width: 100%;
+      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border: none;
+    }
+
+    /* ─── Header ─── */
+    .card__header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, var(--bg-mid) 0%, var(--bg-surface) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card__header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(120deg, rgba(59,130,246,0.05), rgba(245,158,11,0.03));
+      pointer-events: none;
+    }
+
+    .card__header > * { position: relative; z-index: 1; }
+
+    .header-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, var(--accent), #2563eb);
+      color: #fff;
+      font-size: 1rem;
+      margin-right: 10px;
+      box-shadow: 0 2px 8px var(--accent-glow);
+      flex-shrink: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+    }
+
+    .title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      margin: 1px 0 0;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      font-weight: 400;
+    }
+
+    .pill {
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.75rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      transition: background 250ms var(--ease), color 250ms var(--ease), border-color 250ms var(--ease);
+      flex-shrink: 0;
+    }
+
+    .pill--idle {
+      background: rgba(59, 130, 246, 0.12);
+      color: var(--accent);
+      border: 1px solid var(--border-accent);
+    }
+
+    .pill--busy {
+      background: rgba(245, 158, 11, 0.12);
+      color: var(--accent-warm);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      animation: pillPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pillPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.65; }
+    }
+
+    /* ─── Chat ─── */
+    .chat {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 18px 20px 14px;
+      overflow-y: auto;
+      flex: 1;
+      background:
+        radial-gradient(ellipse at 20% 0%, rgba(59,130,246,0.03), transparent 60%),
+        radial-gradient(ellipse at 80% 100%, rgba(245,158,11,0.02), transparent 60%),
+        var(--bg-surface);
+    }
+
+    /* ─── Messages ─── */
+    .msg {
+      max-width: 80%;
+      padding: 11px 14px;
+      border-radius: var(--radius-lg);
+      line-height: 1.55;
+      font-size: 0.9rem;
+      word-break: break-word;
+      animation: msgFadeIn 0.3s var(--ease) both;
+    }
+
+    @keyframes msgFadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user {
+      margin-left: auto;
+      background: linear-gradient(135deg, var(--accent) 0%, #2563eb 100%);
+      color: #fff;
+      border-top-right-radius: 4px;
+      box-shadow: 0 4px 16px var(--accent-glow);
+    }
+
+    .msg.bot {
+      margin-right: auto;
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .msg.system {
+      margin: 0 auto;
+      background: rgba(245, 158, 11, 0.08);
+      color: var(--accent-warm);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: var(--radius-md);
+      font-size: 0.85rem;
+      text-align: center;
+      max-width: 90%;
+    }
+
+    /* ─── Input bar ─── */
+    .input-bar {
+      padding: 14px 16px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      border-top: 1px solid var(--border);
+      background: var(--bg-mid);
+    }
+
+    textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 72px;
+      max-height: 200px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      padding: 11px 14px;
+      font-size: 0.9rem;
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      color: var(--text);
+      background: var(--bg-elevated);
+      transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease);
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    button {
+      background: linear-gradient(135deg, var(--accent), #2563eb);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 12px 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      cursor: pointer;
+      box-shadow: 0 4px 16px var(--accent-glow);
+      transition: transform 120ms var(--ease), box-shadow 120ms var(--ease);
+      min-width: 100px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px var(--accent-glow);
+    }
+
+    button:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 8px var(--accent-glow);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* ─── Markdown inside messages ─── */
+    .msg p { margin: 0 0 6px; }
+    .msg p:last-child { margin-bottom: 0; }
+    .msg ul, .msg ol { margin: 4px 0 6px 18px; padding: 0; }
+    .msg li { margin: 2px 0; }
+    .msg code {
+      background: rgba(59, 130, 246, 0.12);
+      color: var(--accent);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+    .msg.user code {
+      background: rgba(255,255,255,0.18);
+      color: #fff;
+    }
+    .msg pre {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      overflow: auto;
+      margin: 4px 0;
+    }
+    .msg .chatHeading { margin: 6px 0 3px; letter-spacing: 0.01em; color: var(--text); }
+    .msg .chatHeading.h1 { font-size: 1.02rem; }
+    .msg .chatHeading.h2 { font-size: 0.96rem; }
+    .msg .chatHeading.h3 { font-size: 0.92rem; }
+    .msg a { color: var(--accent); text-decoration: underline; }
+    .msg strong { color: var(--text); }
+    .msg.user strong { color: #fff; }
+    .msg .chat-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0;
+      font-size: 0.9em;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .msg .chat-table thead {
+      background: rgba(59, 130, 246, 0.12);
+    }
+    .msg .chat-table th {
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border-accent);
+    }
+    .msg .chat-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .msg .chat-table tbody tr:hover {
+      background: rgba(59, 130, 246, 0.06);
+    }
+    .msg.user .chat-table {
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .msg.user .chat-table thead {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .msg.user .chat-table th {
+      color: #fff;
+      border-bottom-color: rgba(255, 255, 255, 0.2);
+    }
+    .msg.user .chat-table td {
+      border-bottom-color: rgba(255, 255, 255, 0.12);
+    }
+
+    /* ─── Footer ─── */
+    .footer-note {
+      padding: 6px 16px 14px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-align: right;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      background: var(--bg-mid);
+    }
+
+    /* ─── Typing indicator ─── */
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      padding: 6px 0;
+    }
+
+    .typing-dots span {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: dotBounce 1.2s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes dotBounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card__header">
+      <div class="header-left">
+        <div class="header-icon">💬</div>
+        <div>
+          <p class="title">Document Chat</p>
+          <p class="subtitle" id="fileLabel">Connecting…</p>
+        </div>
+      </div>
+      <span class="pill pill--idle" id="statusPill">Ready</span>
+    </div>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="input-bar">
+      <textarea id="input" placeholder="Ask a question about the report…" rows="3"></textarea>
+      <button id="sendBtn">Send</button>
+    </div>
+    <div class="footer-note">Powered by EWA Analyzer</div>
+  </div>
+
+  <script>
+    (function () {
+      const chatEl = document.getElementById('chat');
+      const inputEl = document.getElementById('input');
+      const sendBtn = document.getElementById('sendBtn');
+      const fileLabel = document.getElementById('fileLabel');
+      const statusPill = document.getElementById('statusPill');
+
+      function detectApiBaseUrl() {
+        const host = window.location.hostname;
+        if (host === 'localhost' || host === '127.0.0.1') {
+          return 'http://localhost:8001';
+        }
+        if (host.indexOf('azurewebsites.net') !== -1) {
+          return 'https://sap-ewa-analyzer-backend.azurewebsites.net';
+        }
+        return '';
+      }
+      const apiBaseUrl = detectApiBaseUrl();
+
+      const params = new URLSearchParams(window.location.search);
+      const fileName = params.get('fileName') || '';
+      fileLabel.textContent = fileName ? `Chatting about ${fileName}` : 'No file specified';
+
+      let busy = false;
+      const history = [];
+
+      function setBusy(val) {
+        busy = val;
+        sendBtn.disabled = val;
+        statusPill.textContent = val ? 'Thinking…' : 'Ready';
+        statusPill.className = val ? 'pill pill--busy' : 'pill pill--idle';
+
+        // Show/remove typing indicator
+        const existingDots = document.getElementById('typingIndicator');
+        if (val && !existingDots) {
+          const dotsDiv = document.createElement('div');
+          dotsDiv.id = 'typingIndicator';
+          dotsDiv.className = 'msg bot';
+          dotsDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+          chatEl.appendChild(dotsDiv);
+          chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+        } else if (!val && existingDots) {
+          existingDots.remove();
+        }
+      }
+
+      function addMessage(role, text) {
+        const div = document.createElement('div');
+        div.className = `msg ${role}`;
+        div.innerHTML = renderMarkdown(text);
+        chatEl.appendChild(div);
+        chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+      }
+
+      function renderMarkdown(md) {
+        if (!md) return '';
+        const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const renderInline = (s) => esc(s)
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/\[(.+?)\]\((https?:[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+        const lines = (md || '').split('\n');
+        let html = '';
+        let inList = false;
+        let listTag = 'ul';
+        let inCode = false;
+        let codeLines = [];
+        let inTable = false;
+        let tableLines = [];
+
+        const closeList = () => {
+          if (inList) {
+            html += `</${listTag}>`;
+            inList = false;
+          }
+        };
+
+        const closeTable = () => {
+          if (inTable && tableLines.length > 0) {
+            html += `<table class="chat-table">`;
+            let firstRow = true;
+            for (let i = 0; i < tableLines.length; i++) {
+              const row = tableLines[i];
+              // Skip separator rows (contain only dashes and pipes)
+              if (/^[\s\|\-:]+$/.test(row)) continue;
+              const cells = row.split('|').map(c => c.trim()).filter(c => c);
+              if (cells.length === 0) continue;
+              const tag = firstRow ? 'th' : 'td';
+              const rowTag = firstRow ? 'thead' : 'tbody';
+              if (firstRow) {
+                html += '<thead><tr>';
+                cells.forEach(cell => {
+                  html += `<${tag}>${renderInline(cell)}</${tag}>`;
+                });
+                html += '</tr></thead><tbody>';
+                firstRow = false;
+              } else {
+                html += '<tr>';
+                cells.forEach(cell => {
+                  html += `<td>${renderInline(cell)}</td>`;
+                });
+                html += '</tr>';
+              }
+            }
+            html += '</tbody></table>';
+            inTable = false;
+            tableLines = [];
+          }
+        };
+
+        lines.forEach(lineRaw => {
+          const line = lineRaw || '';
+          const trimmed = line.trim();
+
+          if (trimmed.startsWith('```')) {
+            if (inCode) {
+              html += `<pre><code>${esc(codeLines.join('\n'))}</code></pre>`;
+              codeLines = [];
+              inCode = false;
+            } else {
+              closeList();
+              closeTable();
+              inCode = true;
+            }
+            return;
+          }
+          if (inCode) {
+            codeLines.push(line);
+            return;
+          }
+
+          // Detect markdown tables (lines with pipes)
+          const isTableRow = trimmed.includes('|') && trimmed.startsWith('|') && trimmed.endsWith('|');
+          if (isTableRow) {
+            if (!inTable) {
+              closeList();
+              inTable = true;
+            }
+            tableLines.push(trimmed);
+            return;
+          } else if (inTable) {
+            closeTable();
+          }
+
+          const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+          if (headingMatch) {
+            closeList();
+            const level = Math.min(headingMatch[1].length, 6);
+            const text = renderInline(headingMatch[2]);
+            html += `<p class="chatHeading h${level}"><strong>${text}</strong></p>`;
+            return;
+          }
+
+          const isUl = trimmed.startsWith('- ') || trimmed.startsWith('* ');
+          const isOl = /^\d+\.\s+/.test(trimmed);
+          if (isUl || isOl) {
+            const desired = isOl ? 'ol' : 'ul';
+            if (!inList || listTag !== desired) {
+              closeList();
+              listTag = desired;
+              inList = true;
+              html += `<${listTag}>`;
+            }
+            const item = line.replace(/^(-\s+|\*\s+|\d+\.\s+)/, '');
+            html += `<li>${renderInline(item)}</li>`;
+            return;
+          }
+
+          if (trimmed.length === 0) {
+            closeList();
+            html += '<br>';
+            return;
+          }
+
+          closeList();
+          html += `<p>${renderInline(line)}</p>`;
+        });
+
+        if (inList) html += `</${listTag}>`;
+        if (inCode) html += `<pre><code>${esc(codeLines.join('\n'))}</code></pre>`;
+        if (inTable) closeTable();
+        return html;
+      }
+
+      async function sendMessage() {
+        if (busy) return;
+        const text = (inputEl.value || '').trim();
+        if (!text) return;
+
+        addMessage('user', text);
+        history.push({ isUser: true, text });
+        inputEl.value = '';
+        setBusy(true);
+
+        try {
+          const res = await fetch(`${apiBaseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: text,
+              fileName,
+              documentContent: '',
+              chatHistory: history,
+            })
+          });
+
+          if (!res.ok) {
+            throw new Error(`Chat request failed (${res.status})`);
+          }
+          const data = await res.json();
+          const reply = data.response || data.message || 'No response';
+          history.push({ isUser: false, text: reply });
+          addMessage('bot', reply);
+        } catch (err) {
+          const msg = `Error: ${err.message || err}`;
+          history.push({ isUser: false, text: msg });
+          addMessage('system', msg);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      sendBtn.addEventListener('click', sendMessage);
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      if (fileName) {
+        addMessage('system', `You are now chatting about **${fileName}**. Ask anything related to this report.`);
+      } else {
+        addMessage('system', 'No file specified. Please reopen chat from a document row.');
+      }
+    })();
+  </script>
+</body>
+</html>

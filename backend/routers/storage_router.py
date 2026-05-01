@@ -1,0 +1,576 @@
+"""Storage-related FastAPI routes extracted from ewa_main.py.
+
+Handles:
+- /api/upload  (file upload to Azure Blob Storage)
+- /api/files   (list blobs with processing / AI status)
+- /api/download/{blob_name} (download blob)
+
+This is a straight extraction; functionality is unchanged so existing frontend calls keep working.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import json
+import logging
+import asyncio
+from typing import Dict, Any, List
+from datetime import datetime
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response, Depends
+from pydantic import BaseModel
+from core.azure_clients import (
+    blob_service_client,
+    AZURE_STORAGE_CONNECTION_STRING,
+    AZURE_STORAGE_CONTAINER_NAME,
+)
+from services.storage_service import StorageService
+from workflow_orchestrator import EWAWorkflowOrchestrator
+from core.entra_auth import ADMIN_ROLE, VIEWER_OR_ADMIN, require_roles
+
+logger = logging.getLogger(__name__)
+
+FILENAME_YEAR_CUTOFF = 30
+FILENAME_YEAR_2000_OFFSET = 2000
+FILENAME_YEAR_1900_OFFSET = 1900
+
+# ---------------------------------------------------------------------------
+# Filename validation and metadata extraction
+# ---------------------------------------------------------------------------
+
+def generate_standardized_filename(file_metadata: Dict[str, Any], original_filename: str) -> str:
+    """
+    Generate standardized filename in format: <SID>_<DD>_<MON>_<YEAR>.pdf
+    Example: ERP_07_Jun_25.pdf
+    
+    Args:
+        file_metadata: Dict containing 'system_id' and 'report_date' or 'report_date_str'
+        original_filename: Original filename to extract extension from
+        
+    Returns:
+        Standardized filename string
+    """
+    try:
+        system_id = file_metadata['system_id']
+        
+        # Handle different date formats from AI vs filename extraction
+        if isinstance(file_metadata.get("report_date"), datetime):
+            # AI extraction returns datetime object
+            report_date = file_metadata["report_date"]
+        else:
+            # Try to parse from report_date_str or report_date
+            date_str = file_metadata.get("report_date_str") or file_metadata.get("report_date")
+            if date_str:
+                # Try different date formats
+                for fmt in ["%d.%m.%Y", "%d/%m/%Y", "%Y-%m-%d"]:
+                    try:
+                        report_date = datetime.strptime(date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    # If all parsing fails, use current date
+                    report_date = datetime.now()
+            else:
+                report_date = datetime.now()
+        
+        # Get file extension from original filename
+        _, ext = os.path.splitext(original_filename)
+        if not ext:
+            ext = '.pdf'  # Default to PDF
+            
+        # Format: <SID>_<DD>_<MON>_<YEAR>
+        day = report_date.strftime("%d")
+        month = report_date.strftime("%b")  # Short month name (Jan, Feb, etc.)
+        year = report_date.strftime("%y")   # 2-digit year
+        
+        new_filename = f"{system_id}_{day}_{month}_{year}{ext}"
+        
+        logger.info("Generated standardized filename: %s -> %s", original_filename, new_filename)
+        return new_filename
+        
+    except Exception as e:
+        logger.warning("Error generating standardized filename: %s. Using original filename.", e)
+        return original_filename
+
+def validate_filename_and_extract_metadata(filename: str) -> Dict[str, Any]:
+    """
+    Validate filename format and extract system ID and report date.
+    Expected format: <SID>_ddmmyy.pdf (e.g., ERP_090625.pdf)
+    
+    Returns:
+        Dict with 'system_id', 'report_date', and 'report_date_str'
+    
+    Raises:
+        ValueError: If filename doesn't match expected format
+    """
+    # Remove extension and check format
+    name_without_ext = os.path.splitext(filename)[0]
+    
+    # Pattern: SID_ddmmyy
+    pattern = r'^([A-Z0-9]+)_(\d{6})$'
+    match = re.match(pattern, name_without_ext)
+    
+    if not match:
+        raise ValueError(
+            f"Filename '{filename}' must follow format <SID>_ddmmyy.pdf (e.g., ERP_090625.pdf). "
+            f"SID should be alphanumeric uppercase, date should be 6 digits (ddmmyy)."
+        )
+    
+    system_id = match.group(1)
+    date_str = match.group(2)
+    
+    # Parse date: ddmmyy
+    try:
+        day = int(date_str[:2])
+        month = int(date_str[2:4])
+        year = int(date_str[4:6])
+        
+        # Assume years 00-30 are 2000s, 31-99 are 1900s
+        if year <= FILENAME_YEAR_CUTOFF:
+            year += FILENAME_YEAR_2000_OFFSET
+        else:
+            year += FILENAME_YEAR_1900_OFFSET
+            
+        report_date = datetime(year, month, day)
+        report_date_str = report_date.strftime("%d.%m.%Y")
+        
+    except ValueError as e:
+        raise ValueError(f"Invalid date in filename '{filename}': {date_str}. Error: {str(e)}")
+    
+    return {
+        "system_id": system_id,
+        "report_date": report_date,
+        "report_date_str": report_date_str
+    }
+
+# ---------------------------------------------------------------------------
+# Router definition
+# ---------------------------------------------------------------------------
+router = APIRouter(prefix="/api", tags=["storage"])
+storage_service = StorageService()
+
+# ------------------------- Upload endpoint ------------------------- #
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...), 
+    customer_name: str = Form(...),
+    system_id: str = Form(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+):
+    """Upload a ZIP file, convert contained HTML to Markdown, and store in Azure Blob with provided metadata."""
+
+    if not blob_service_client:
+        raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized. Check server logs and .env configuration.")
+    if not file:
+        raise HTTPException(status_code=400, detail="No file sent.")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+        
+    if not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip files containing HTML exports are supported.")
+
+    try:
+        import tempfile
+        import zipfile
+        import asyncio
+        from converters.html_markdown_converter import convert_html_to_markdown
+        
+        contents = await file.read()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, "upload.zip")
+            with open(zip_path, "wb") as f:
+                f.write(contents)
+                
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    real_temp = os.path.realpath(temp_dir)
+                    for member in zip_ref.namelist():
+                        dest = os.path.realpath(os.path.join(real_temp, member))
+                        if not (dest.startswith(real_temp + os.sep) or dest == real_temp):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Invalid ZIP archive: path traversal detected.",
+                            )
+                    zip_ref.extractall(temp_dir)
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
+            
+            # Find the .htm or .html file
+            html_file_path = None
+            for root, dirs, extracted_files in os.walk(temp_dir):
+                for extracted_file in extracted_files:
+                    if extracted_file.lower().endswith(('.htm', '.html')):
+                        html_file_path = os.path.join(root, extracted_file)
+                        break
+                if html_file_path:
+                    break
+                    
+            if not html_file_path:
+                raise HTTPException(status_code=400, detail="No .htm or .html file found in the uploaded zip.")
+                
+            logger.info("Found HTML file in zip: %s", html_file_path)
+            
+            # Convert HTML to Markdown
+            markdown_content = await asyncio.to_thread(convert_html_to_markdown, html_file_path)
+            
+            if not markdown_content:
+                raise HTTPException(status_code=500, detail="Failed to convert HTML to Markdown.")
+                
+            logger.info("Successfully converted HTML to Markdown (%d bytes)", len(markdown_content))
+        
+            # Format dates (from YYYY-MM-DD input from frontend)
+            try:
+                report_date = datetime.strptime(end_date, "%Y-%m-%d")
+                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format provided. Expected YYYY-MM-DD.")
+            
+            file_metadata = {
+                "system_id": system_id.upper(),
+                "report_date": report_date,
+                "report_date_str": report_date.strftime("%d.%m.%Y")
+            }
+                
+            # Generate new filename based on extracted metadata.
+            # It returns .zip extension since the original file was .zip.
+            # We want to save the markdown as .md, so we adjust the filename.
+            new_filename = generate_standardized_filename(file_metadata, file.filename)
+            # Replace .zip with .md
+            blob_name = re.sub(r'\.zip$', '.md', new_filename, flags=re.IGNORECASE)
+            
+            blob_client = blob_service_client.get_blob_client(
+                container=AZURE_STORAGE_CONTAINER_NAME, blob=blob_name
+            )
+
+            logger.info(
+                "Uploading markdown to Azure Blob Storage in container %s as blob %s",
+                AZURE_STORAGE_CONTAINER_NAME,
+                blob_name,
+            )
+            logger.info(
+                "Extracted metadata - System ID: %s, Report Date: %s, Customer: %s",
+                file_metadata["system_id"],
+                file_metadata["report_date_str"],
+                customer_name,
+            )
+
+            metadata: Dict[str, Any] = {
+                "customer_name": customer_name,
+                "system_id": file_metadata["system_id"],
+                "report_date": report_date.isoformat(),
+                "report_date_str": file_metadata["report_date_str"],
+                "start_date": start_date_obj.isoformat(),
+                "start_date_str": start_date_obj.strftime("%d.%m.%Y")
+            }
+
+            blob_client.upload_blob(markdown_content.encode('utf-8'), overwrite=True, metadata=metadata, content_type="text/markdown")
+
+            logger.info(
+                "Successfully uploaded %s to %s with metadata: %s",
+                file.filename,
+                blob_name,
+                metadata,
+            )
+            return {
+                "filename": blob_name,  # Return the new standardized filename ending in .md
+                "original_filename": file.filename,  # Include original for reference
+                "customer_name": customer_name,
+                "system_id": file_metadata["system_id"],
+                "report_date": file_metadata["report_date_str"],
+                "message": "File processed and uploaded successfully to Azure Blob Storage.",
+            }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.exception("Error processing file %s: %s", file.filename, e)
+        raise HTTPException(status_code=500, detail=f"Could not process and upload file: {str(e)}")
+
+
+# ------------------------- List endpoint ------------------------- #
+
+@router.get("/files")
+async def list_files(_user: dict = Depends(require_roles(*VIEWER_OR_ADMIN))):
+    """List all files stored in Azure Blob Storage with their processing status and sequential processing opportunities."""
+
+    if not blob_service_client:
+        raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
+
+    try:
+        container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
+        blob_list = list(container_client.list_blobs())
+
+        logger.info("Found %s total blobs in container", len(blob_list))
+
+        json_files: Dict[str, bool] = {}
+        md_files: Dict[str, bool] = {}
+        ai_analyzed_files: Dict[str, bool] = {}
+
+        for blob in blob_list:
+            name_low = blob.name.lower()
+            base_name, ext = os.path.splitext(blob.name)
+
+            if ext == ".json":
+                json_files[base_name] = True
+                if base_name.endswith("_AI"):
+                    ai_analyzed_files[base_name[:-3]] = True  # strip _AI
+                elif base_name.endswith("_workbook_payload"):
+                    ai_analyzed_files[base_name[:-17]] = True  # strip _workbook_payload
+            elif ext == ".md":
+                md_files[base_name] = True
+                if base_name.endswith("_AI"):
+                    ai_analyzed_files[base_name[:-3]] = True
+            elif ext == ".xlsx" and base_name.endswith("_workbook"):
+                ai_analyzed_files[base_name[:-9]] = True  # strip _workbook
+
+        files: list[dict[str, Any]] = []
+        file_groups: dict[str, list[dict[str, Any]]] = {}  # Group by customer+SID
+        
+        pdf_zips = {os.path.splitext(b.name)[0] for b in blob_list if b.name.lower().endswith(('.pdf', '.zip'))}
+        
+        for blob in blob_list:
+            name_low = blob.name.lower()
+            base_name, _ = os.path.splitext(blob.name)
+            
+            # Skip AI analysis artifacts
+            if name_low.endswith(".json"):
+                continue  # skip auxiliary files in main listing
+            if (
+                name_low.endswith("_workbook.xlsx")
+                or name_low.endswith("_workbook_payload.json")
+                or name_low.endswith("_v2_usage.json")
+            ):
+                continue  # skip V2 workbook artifacts from main listing
+                
+            # If it's a regular .md file from the old workflow, it has a corresponding .pdf
+            # Skip it so we don't show duplicates. For new zip uploads, only the .md exists.
+            if name_low.endswith(".md") and base_name in pdf_zips:
+                continue
+
+            blob_client = container_client.get_blob_client(blob.name)
+            properties = await asyncio.to_thread(blob_client.get_blob_properties)
+            metadata = properties.metadata or {}
+
+            base_name, _ = os.path.splitext(blob.name)
+            customer_name = metadata.get("customer_name", "Unknown")
+            system_id = metadata.get("system_id", "Unknown")
+            processed = base_name in json_files or base_name in md_files
+            ai_analyzed = base_name in ai_analyzed_files
+            
+            # Check for processing flag in metadata
+            is_processing = metadata.get("processing", "").lower() == "true"
+            last_status = (metadata.get("last_status") or "").lower()
+            
+            file_info = {
+                "name": blob.name,
+                "last_modified": blob.last_modified,
+                "size": blob.size,
+                "report_date": metadata.get("report_date"),
+                "report_date_str": metadata.get("report_date_str"),
+                "customer_name": customer_name,
+                "system_id": system_id,
+                "processed": processed,
+                "ai_analyzed": ai_analyzed,
+                "processing": is_processing,  # Add processing flag
+                "last_status": last_status,
+                "last_error_status_code": metadata.get("last_error_status_code"),
+                "last_error_hint": metadata.get("last_error_hint"),
+                "last_error_message": metadata.get("last_error_message"),
+            }
+            
+            files.append(file_info)
+            
+            # Group files by customer+SID for sequential processing detection
+            group_key = f"{customer_name}|{system_id}"
+            if group_key not in file_groups:
+                file_groups[group_key] = []
+            file_groups[group_key].append(file_info)
+        
+        # Detect sequential processing opportunities
+        sequential_groups = []
+        for group_key, group_files in file_groups.items():
+            if len(group_files) > 1:
+                customer_name, system_id = group_key.split('|')
+                unprocessed_files = [f for f in group_files if not f['processed']]
+                
+                if len(unprocessed_files) > 1:
+                    # Sort by report date for proper ordering display
+                    unprocessed_files.sort(key=lambda f: f['report_date'] if f['report_date'] else f['last_modified'])
+                    
+                    sequential_groups.append({
+                        "customer_name": customer_name,
+                        "system_id": system_id,
+                        "total_files": len(group_files),
+                        "unprocessed_files": len(unprocessed_files),
+                        "files": unprocessed_files,
+                        "earliest_date": unprocessed_files[0]['report_date_str'],
+                        "latest_date": unprocessed_files[-1]['report_date_str']
+                    })
+        
+        # Add sequential processing metadata to individual files
+        for file_info in files:
+            group_key = f"{file_info['customer_name']}|{file_info['system_id']}"
+            group_files = file_groups.get(group_key, [])
+            unprocessed_in_group = [f for f in group_files if not f['processed']]
+            
+            file_info['sequential_processing_available'] = len(unprocessed_in_group) > 1
+            file_info['files_in_group'] = len(group_files)
+            file_info['unprocessed_in_group'] = len(unprocessed_in_group)
+
+        logger.info(
+            "Returning %s files with %s sequential processing opportunities",
+            len(files),
+            len(sequential_groups),
+        )
+        return {
+            "files": files,
+            "sequential_groups": sequential_groups
+        }
+    except Exception as e:
+        logger.exception("Error listing files: %s", e)
+        raise HTTPException(status_code=500, detail=f"Could not list files: {str(e)}")
+
+
+# ------------------------- Delete Analysis endpoint ------------------------- #
+
+class DeleteAnalysisRequest(BaseModel):
+    fileName: str
+    baseName: str
+
+class DeleteAnalysisResponse(BaseModel):
+    message: str
+    deleted_files: List[str]
+    errors: List[str]
+
+@router.delete("/delete-analysis", response_model=DeleteAnalysisResponse)
+async def delete_analysis(
+    request_data: DeleteAnalysisRequest,
+    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+):
+    """Delete an analysis and all related files from Azure Blob Storage."""
+    
+    if not blob_service_client:
+        raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
+    
+    try:
+        file_name = request_data.fileName
+
+        if not file_name:
+            raise HTTPException(status_code=400, detail="File name not provided")
+
+        # Reject path traversal or directory separator characters in the file name
+        if ".." in file_name or "/" in file_name or "\\" in file_name:
+            raise HTTPException(status_code=400, detail="Invalid file name")
+
+        # Derive base_name server-side; ignore any client-supplied baseName
+        base_name = os.path.splitext(file_name)[0]
+
+        # Allowlist of derivative suffixes that may be deleted for this document
+        _DERIVATIVE_SUFFIXES = (
+            ".md", ".json", ".xlsx",
+            "_workbook.xlsx", "_workbook_payload.json",
+            "_v2_usage.json",
+        )
+        allowed_blob_names = {file_name} | {f"{base_name}{s}" for s in _DERIVATIVE_SUFFIXES}
+
+        container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
+
+        # Delete only blobs that match the base name with a known derivative suffix
+        deleted_files = []
+        errors = []
+        try:
+            blob_list = await asyncio.to_thread(lambda: list(container_client.list_blobs(name_starts_with=base_name)))
+            for blob in blob_list:
+                if blob.name not in allowed_blob_names:
+                    continue
+                try:
+                    blob_client = container_client.get_blob_client(blob.name)
+                    await asyncio.to_thread(blob_client.delete_blob)
+                    deleted_files.append(blob.name)
+                except Exception as e:
+                    errors.append(f"Failed to delete {blob.name}: {str(e)}")
+        except Exception as e:
+            errors.append(f"Failed to list blobs: {str(e)}")
+
+        return {
+            "message": f"Analysis for {file_name} deletion processed",
+            "deleted_files": deleted_files,
+            "errors": errors
+        }
+        
+    except Exception as e:
+        logger.exception(
+            "Error deleting analysis for %s: %s",
+            getattr(request_data, "fileName", "unknown file"),
+            e,
+        )
+        raise HTTPException(status_code=500, detail=f"Could not delete analysis files: {str(e)}")
+
+
+# ------------------------- Download endpoint ------------------------- #
+
+@router.get("/download/{blob_name}")
+async def download_file(
+    blob_name: str,
+    _user: dict = Depends(require_roles(*VIEWER_OR_ADMIN)),
+):
+    """Download a file from Azure Blob Storage."""
+
+    try:
+        if not blob_service_client:
+            raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized")
+
+        if blob_name.endswith(".md"):
+            try:
+                content = await asyncio.to_thread(storage_service.get_text_content, blob_name)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"File {blob_name} not found") from None
+            content_type = "text/markdown"
+        elif blob_name.endswith(".json"):
+            try:
+                content = await asyncio.to_thread(storage_service.get_text_content, blob_name)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"File {blob_name} not found") from None
+            content_type = "application/json"
+        else:
+            try:
+                content = await asyncio.to_thread(storage_service.get_bytes, blob_name)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"File {blob_name} not found") from None
+
+            if blob_name.endswith(".xlsx"):
+                content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            elif blob_name.endswith(".pdf"):
+                content_type = "application/pdf"
+            else:
+                content_type = "application/octet-stream"
+
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+
+        if blob_name.endswith(".pdf"):
+            content_type = "application/pdf"
+        elif blob_name.endswith(".xlsx"):
+            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+        disposition = "attachment" if blob_name.endswith(".xlsx") else "inline"
+
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Content-Disposition": f"{disposition}; filename=\"{blob_name}\""},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_message = f"Error downloading file {blob_name}: {str(e)}"
+        logger.exception(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
