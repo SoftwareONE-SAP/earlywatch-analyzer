@@ -15,7 +15,6 @@ Start from a clean workspace with rotated secrets and a clear Azure target.
 - [ ] Identify the target Azure subscription, resource group, and region.
 - [ ] Rotate any credentials that may have existed in plaintext files.
 - [ ] Confirm no real secrets will be copied into source-controlled files.
-- [ ] Decide whether BTP fallback must remain available.
 
 ### Exit Criteria
 
@@ -126,19 +125,6 @@ Verify the app works end-to-end in Azure.
 - [ ] Upload a small EWA file and confirm blobs appear in the configured container.
 - [ ] Run an analysis and confirm Excel export works.
 - [ ] Confirm the Container App can scale back to zero when idle.
-
-## Step 7: Optional BTP Fallback
-
-### Goal
-
-Retain BTP deployment assets without mixing them into the Azure runtime.
-
-### Checklist
-
-- [ ] Keep `mta.yaml`, `xs-security.json`, `approuter/`, and `ui-deployer/` in the repo.
-- [ ] Keep `mtaext.example.yaml` as the template only.
-- [ ] Create `mtaext.yaml` only in a secure local or CI environment.
-- [ ] Do not commit `mtaext.yaml`.
 
 ## References
 

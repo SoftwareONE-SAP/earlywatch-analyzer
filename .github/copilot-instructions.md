@@ -1,6 +1,6 @@
 # EWA Analyzer Azure Migration Minimal Clone
 
-This project contains the backend, frontend, and deployment assets for the EWA Analyzer application. It supports SAPUI5-based analysis workflows, Azure Blob-backed persistence, AI-assisted report generation, and both Azure Web Apps and SAP BTP deployment paths.
+This project contains the backend, frontend, and deployment assets for the EWA Analyzer application. It supports SAPUI5-based analysis workflows, Azure Blob-backed persistence, AI-assisted report generation, and an Azure Container Apps deployment path.
 
 ## Tech Stack
 
@@ -76,5 +76,5 @@ This project uses a structured session memory system. Context files live in `.ai
 - Backend runtime state is stored in Azure Blob Storage, not a database.
 - `sapui5/webapp/model/config.js` and `sapui5/webapp/chat.html` contain the backend URL and must stay aligned.
 - Keep real secrets out of source files; use Azure Web App settings, Key Vault, GitHub Actions secrets, or BTP deployment secrets.
-- Preserve both Azure Web Apps and BTP deployment artifacts so the project can support either migration path.
+- Keep Azure deployment artifacts aligned with the Container Apps path; legacy SAP BTP files are not part of the supported deployment path.
 - Treat `backend/ewa_pipeline/` as the newer structured analysis pipeline and `backend/` root modules as the app entry/service layer.

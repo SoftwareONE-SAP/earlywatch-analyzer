@@ -5,7 +5,7 @@
 
 ## Overview
 
-This repository contains the runtime, frontend, and deployment assets for the EWA Analyzer application. The backend is a stateless FastAPI service that stores artifacts in Azure Blob Storage. The recommended Azure target is a single Azure Container App running a combined image that serves both the backend API and the built SAPUI5 frontend from the same origin. The repo also keeps BTP deployment files and Azure migration documentation so the application can still be deployed in either environment.
+This repository contains the runtime, frontend, and deployment assets for the EWA Analyzer application. The backend is a stateless FastAPI service that stores artifacts in Azure Blob Storage. The active Azure target is a single Azure Container App running a combined image that serves both the backend API and the built SAPUI5 frontend from the same origin. Legacy SAP BTP artifacts may still be present in the repository, but they are not part of the supported deployment path.
 
 ## Tech Stack
 
@@ -83,8 +83,6 @@ This repository contains the runtime, frontend, and deployment assets for the EW
 | `.github/workflows/deploy-to-containerapp.yml` | GitHub Actions deployment workflow for the Container App target. |
 | `docs/AZURE_MIGRATION_GUIDE.md` | Azure migration runbook. |
 | `docs/RUNTIME_ARCHITECTURE.md` | Runtime shape and environment variable reference. |
-| `mta.yaml` | BTP deployment descriptor. |
-| `xs-security.json` | XSUAA security model. |
 
 ## Decision Log
 

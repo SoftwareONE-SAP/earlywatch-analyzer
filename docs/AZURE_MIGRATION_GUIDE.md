@@ -25,7 +25,7 @@ This keeps the frontend and backend on the same origin, removes the need for a s
 - [ ] Identify the target Azure subscription, resource group, and region.
 - [ ] Rotate any credentials that were ever stored in plaintext files.
 - [ ] Confirm no real secrets will be copied into source-controlled files.
-- [ ] Decide whether BTP fallback must remain available.
+- [ ] Confirm this is an Azure-only deployment with no BTP fallback requirement.
 
 ### 2. Confirm Runtime Expectations
 
@@ -74,7 +74,7 @@ Rotate any credentials that were ever present in local plaintext files before de
 - Azure OpenAI keys
 - Azure AI Foundry or Anthropic keys if still used
 - ACR credentials
-- Cloud Foundry or BTP credentials if still used
+- Azure credentials if still used
 
 Do not copy `mtaext.yaml`, `.env`, or other local config files into source control.
 
@@ -111,129 +111,9 @@ az containerapp env create --name $caEnv --resource-group $rg --location $locati
 
 # Bootstrap app so runtime settings and auth can be configured before the first real deploy.
 az containerapp create --name $app --resource-group $rg --environment $caEnv `
-  --image mcr.microsoft.com/k8se/quickstart:latest `
-  --ingress external --target-port 80 `
-  --min-replicas 0 --max-replicas 1
-```
+  ## Legacy Notes
 
-If `az storage container create --auth-mode login` fails because of RBAC, create the container in the Azure Portal or use an account key.
-
-## 4. Configure Runtime Variables
-
-Set backend runtime values on the Container App. Same-origin hosting means no frontend URL rewrite and no CORS configuration are required for the recommended path.
-
-```powershell
-$storageConnection = az storage account show-connection-string --resource-group $rg --name $storage --query connectionString -o tsv
-
-az containerapp update --resource-group $rg --name $app --set-env-vars `
-  ENVIRONMENT=production `
-  AUTH_ENABLED=true `
-  TRUST_PLATFORM_AUTH_HEADERS=true `
-  AZURE_STORAGE_CONNECTION_STRING="$storageConnection" `
-  AZURE_STORAGE_CONTAINER_NAME="$container" `
-  PROVIDER=openai `
-  AZURE_OPENAI_ENDPOINT="<your-azure-openai-endpoint>" `
-  AZURE_OPENAI_API_KEY="<your-azure-openai-key>" `
-  AZURE_OPENAI_API_VERSION="2025-03-01-preview" `
-  AZURE_OPENAI_SUMMARY_MODEL="<deployment-name>" `
-  AZURE_OPENAI_PARAM_MODEL="<deployment-name>" `
-  AZURE_OPENAI_FAST_MODEL="<deployment-name>" `
-  AZURE_OPENAI_CHAT_MODEL="<deployment-name>" `
-  V2_ROUTER_MODEL="<deployment-name>" `
-  V2_SPECIALIST_MODEL="<deployment-name>" `
-  V2_DEEP_MODEL="<deployment-name>"
-```
-
-If you want stricter secret handling, store these values as Container App secrets or Key Vault references instead of plain environment values.
-
-## 5. Enable Microsoft Entra Authentication
-
-Create or reuse a Microsoft Entra app registration for the Container App login flow, then enable built-in auth on the Container App.
-
-```powershell
-$tenantId = "<entra-tenant-id>"
-$clientId = "<entra-app-client-id>"
-$clientSecret = "<entra-app-client-secret>"
-
-az containerapp auth microsoft update `
-  --resource-group $rg `
-  --name $app `
-  --client-id $clientId `
-  --client-secret $clientSecret `
-  --tenant-id $tenantId `
-  --issuer "https://login.microsoftonline.com/$tenantId/v2.0" `
-  --yes
-
-az containerapp auth update `
-  --resource-group $rg `
-  --name $app `
-  --enabled true `
-  --unauthenticated-client-action RedirectToLoginPage `
-  --yes
-```
-
-Important:
-
-- Assign Entra app roles named `Viewer` and `Administrator` to users or groups that will use the application.
-- The backend reads the authenticated principal from Container Apps auth headers when `TRUST_PLATFORM_AUTH_HEADERS=true`.
-
-## 6. GitHub Actions Deployment
-
-The clone includes `.github/workflows/deploy-to-containerapp.yml`.
-
-Create these GitHub repository secrets:
-
-| Secret | Purpose |
-| --- | --- |
-| `ACR_LOGIN_SERVER` | Example: `myregistry.azurecr.io`. |
-| `REGISTRY_USERNAME` | ACR username or service principal username. |
-| `REGISTRY_PASSWORD` | ACR password or service principal password. |
-| `AZURE_CREDENTIALS` | JSON credentials for `azure/login`. |
-| `AZURE_RESOURCE_GROUP` | Resource group containing the Container App. |
-| `AZURE_CONTAINER_APP_NAME` | Container App name, for example `ewa-analyzer`. |
-| `AZURE_CONTAINERAPPS_ENVIRONMENT` | Container Apps environment name. |
-
-Create `AZURE_CREDENTIALS` with a service principal:
-
-```powershell
-az ad sp create-for-rbac `
-  --name "sp-ewa-analyzer-deploy" `
-  --role contributor `
-  --scopes "/subscriptions/<subscription-id>/resourceGroups/<resource-group>" `
-  --sdk-auth
-```
-
-Store the JSON output as the `AZURE_CREDENTIALS` secret.
-
-The workflow builds `Dockerfile.containerapp`, pushes `ewa-analyzer:<sha>` and `latest` to ACR, then runs `az containerapp up` to create or update the Container App image.
-
-## 7. Local Smoke Test
-
-If Docker is available locally, validate the combined image before relying on GitHub Actions:
-
-```powershell
-docker build -f Dockerfile.containerapp -t ewa-analyzer:local .
-docker run --rm -p 8001:8001 `
-  -e ENVIRONMENT=production `
-  -e AUTH_ENABLED=false `
-  -e AZURE_STORAGE_CONNECTION_STRING="<connection-string>" `
-  -e AZURE_STORAGE_CONTAINER_NAME="earlywatch" `
-  -e PROVIDER="openai" `
-  -e AZURE_OPENAI_ENDPOINT="<endpoint>" `
-  -e AZURE_OPENAI_API_KEY="<key>" `
-  -e AZURE_OPENAI_API_VERSION="2025-03-01-preview" `
-  -e AZURE_OPENAI_SUMMARY_MODEL="<deployment>" `
-  -e AZURE_OPENAI_PARAM_MODEL="<deployment>" `
-  -e AZURE_OPENAI_FAST_MODEL="<deployment>" `
-  -e AZURE_OPENAI_CHAT_MODEL="<deployment>" `
-  ewa-analyzer:local
-```
-
-Check health:
-
-```powershell
-Invoke-WebRequest http://localhost:8001/api/health
-```
+  Older Azure Web Apps and SAP BTP migration snippets have been removed from the active runbook.
 
 ## 8. Validation Checklist
 
@@ -263,25 +143,9 @@ Workflow pushes image but app does not update:
 - Confirm `AZURE_CONTAINER_APP_NAME` and `AZURE_CONTAINERAPPS_ENVIRONMENT` secrets are correct.
 - Confirm the ACR credentials in GitHub match the registry attached to the Container App.
 
-## 10. Optional BTP Fallback
+## Legacy Notes
 
-The clone still includes BTP deployment assets:
-
-- `mta.yaml`
-- `xs-security.json`
-- `approuter/`
-- `ui-deployer/`
-- `.github/workflows/deploy-to-btp.yml`
-- `scripts/deploy-local-btp.ps1`
-- `mtaext.example.yaml`
-
-To deploy to BTP manually, copy `mtaext.example.yaml` to `mtaext.yaml` in a secure local environment, fill values from your secret store, then run:
-
-```powershell
-.\scripts\deploy-local-btp.ps1
-```
-
-Do not commit `mtaext.yaml`.
+Legacy SAP BTP deployment assets may still exist in the repository, but they are not part of the supported Azure deployment path.
 
 ```powershell
 $acrLoginServer = az acr show --resource-group $rg --name $acr --query loginServer -o tsv
@@ -372,25 +236,9 @@ Operational:
 - Confirm Web Apps restart cleanly.
 - Confirm model deployment names match Azure OpenAI deployment names, not generic model names.
 
-## 13. BTP Fallback
+## Legacy Notes
 
-The clone still includes BTP deployment assets:
-
-- `mta.yaml`
-- `xs-security.json`
-- `approuter/`
-- `ui-deployer/`
-- `.github/workflows/deploy-to-btp.yml`
-- `scripts/deploy-local-btp.ps1`
-- `mtaext.example.yaml`
-
-To deploy to BTP manually, copy `mtaext.example.yaml` to `mtaext.yaml` in a secure local environment, fill values from your secret store, then run:
-
-```powershell
-.\scripts\deploy-local-btp.ps1
-```
-
-Do not commit `mtaext.yaml`.
+Legacy SAP BTP deployment assets may still exist in the repository, but they are not part of the supported Azure deployment path.
 
 ## 14. Common Failures
 

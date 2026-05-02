@@ -1,6 +1,6 @@
 # Runtime Architecture
 
-This is the minimum runtime context for the current Azure target.
+This is the minimum runtime context for the current Azure-only target.
 
 ## Recommended Azure Shape
 
@@ -16,9 +16,8 @@ This is the minimum runtime context for the current Azure target.
 
 - `backend/`: FastAPI API service. In the combined deployment it also serves the built SAPUI5 assets when `sapui5/dist/` is present.
 - `sapui5/`: SAPUI5 frontend source. In Azure it is built into static assets and served from the same origin as the API.
-- `approuter/`: SAP BTP approuter. Keep only for BTP fallback; it is not part of the recommended Azure runtime.
-- `ui-deployer/`: SAP HTML5 repository deployer for BTP fallback only.
-- `mta.yaml` and `xs-security.json`: BTP deployment/auth descriptors retained for rollback or hybrid deployment.
+
+Legacy SAP BTP artifacts may still exist in the repository, but they are not part of the active Azure runtime.
 
 ## Persistent State
 
@@ -91,5 +90,5 @@ Optional Anthropic-on-Azure variables:
 
 - The combined image requires the SAPUI5 build output to exist under `sapui5/dist/`; `Dockerfile.containerapp` handles this automatically.
 - Long-running analysis requests can take minutes. Keep Container App ingress and client timeouts high enough for interactive runs.
-- If `CORS_ALLOWED_ORIGINS` is unset in production, the backend now allows only same-origin requests. Add explicit origins only if you intentionally split frontend and backend again.
+- If `CORS_ALLOWED_ORIGINS` is unset in production, the backend now allows only same-origin requests.
 - Azure Blob Storage remains the only persistent store. Losing or misconfiguring the container name will break uploads and report retrieval.

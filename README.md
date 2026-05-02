@@ -1,21 +1,19 @@
 # EWA Analyzer Azure Migration Minimal Clone
 
-This folder contains the minimum runtime and deployment assets needed to validate and migrate the EWA Analyzer application safely.
+This folder contains the Azure runtime and deployment assets needed to run the EWA Analyzer application safely.
 
 ## Contents
 
 - `backend/`: Python FastAPI service and Azure/OpenAI/storage integration.
 - `sapui5/`: SAPUI5 frontend source and build config.
-- `approuter/`: SAP approuter route/auth config.
-- `ui-deployer/`: HTML5 repo deployer module for MTA builds.
-- `mta.yaml`: BTP MTA module/resource definition.
-- `xs-security.json`: XSUAA scopes and role templates.
 - `.github/workflows/`: current CI/CD workflows.
-- `.env.example` and `mtaext.example.yaml`: sanitized config templates.
+- `.env.example`: sanitized runtime config template.
+
+Legacy SAP BTP files may still be present in the repo, but they are not part of the active Azure deployment path.
 
 ## Secret Handling
 
-Do not commit real secrets. Keep real values in GitHub Actions secrets, Azure Key Vault, Azure App Service/Container App settings, or BTP/Cloud Foundry deployment secrets.
+Do not commit real secrets. Keep real values in GitHub Actions secrets, Azure Key Vault, or Azure Container App settings.
 
 Before migration, rotate any credentials that were previously present in local files such as `mtaext.yaml`.
 
@@ -38,9 +36,7 @@ npm run build
 
 ## Deployment Notes
 
-- Copy `mtaext.example.yaml` to `mtaext.yaml` only in a secure local/CI environment.
 - Replace placeholders using secret-store values.
-- `mtaext.yaml` is ignored by git.
 - The local `docker-compose.yml` is for smoke testing only; production Azure deployment should use managed secrets and explicit container/image definitions.
 
 ## Migration Instructions
