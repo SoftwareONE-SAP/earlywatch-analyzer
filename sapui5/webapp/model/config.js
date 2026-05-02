@@ -4,15 +4,15 @@ sap.ui.define([], function () {
     /**
      * Detect the runtime environment.
      * - "local": localhost development
-     * - "azure": Azure Web Apps (sap-ewa-analyzer-backend.azurewebsites.net)
-     * - "btp": SAP BTP Cloud Foundry (relative URLs via AppRouter)
+     * - "azure": Azure-hosted deployment using same-origin API calls
+     * - "btp": SAP BTP Cloud Foundry using same-origin API calls
      */
     function detectEnvironment() {
         var hostname = window.location.hostname;
         if (hostname === "localhost" || hostname === "127.0.0.1") {
             return "local";
         }
-        if (hostname.indexOf("azurewebsites.net") !== -1) {
+        if (hostname.indexOf("azurewebsites.net") !== -1 || hostname.indexOf("azurecontainerapps.io") !== -1) {
             return "azure";
         }
         // BTP: cfapps.*.hana.ondemand.com or custom domain
@@ -33,10 +33,8 @@ sap.ui.define([], function () {
             apiBaseUrl = "http://localhost:8001";
             break;
         case "azure":
-            apiBaseUrl = "https://sap-ewa-analyzer-backend.azurewebsites.net";
-            break;
         case "btp":
-            // On BTP, AppRouter handles routing - use relative URLs
+            // Hosted deployments use same-origin API calls.
             apiBaseUrl = "";
             break;
         default:

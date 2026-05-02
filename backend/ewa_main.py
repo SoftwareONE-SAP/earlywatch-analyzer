@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import os
 import logging
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from core.entra_auth import EntraAuthMiddleware
 from core.logging_config import setup_logging
-from core.runtime_config import DISABLE_API_DOCS
+from core.runtime_config import DISABLE_API_DOCS, ENVIRONMENT
 import uvicorn
 
 # ---------------------------------------------------------------------------
@@ -25,6 +27,26 @@ import uvicorn
 load_dotenv()
 setup_logging()
 logger = logging.getLogger(__name__)
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIST = BASE_DIR / "sapui5" / "dist"
+
+
+def _resolve_frontend_file(path: str) -> Path | None:
+    if not FRONTEND_DIST.exists():
+        return None
+
+    frontend_root = FRONTEND_DIST.resolve()
+    relative_path = path.strip("/")
+    candidate = (frontend_root / relative_path) if relative_path else (frontend_root / "index.html")
+    try:
+        candidate = candidate.resolve()
+        candidate.relative_to(frontend_root)
+    except (OSError, ValueError):
+        return None
+
+    if candidate.is_file():
+        return candidate
+    return None
 
 # Parse CORS allowed origins from environment variable (comma-separated or JSON array)
 def _parse_cors_origins() -> list[str]:
@@ -43,14 +65,22 @@ def _parse_cors_origins() -> list[str]:
             logger.info("CORS allowed origins from env: %s", origins)
             return origins
     
-    # Development default
     dev_origins = ["http://localhost:3000", "http://localhost:5000", "http://localhost:8080"]
+
+    if ENVIRONMENT in {"local", "development", "dev"}:
+        logger.warning(
+            "CORS_ALLOWED_ORIGINS not set. Using development defaults: %s. "
+            "For production, set CORS_ALLOWED_ORIGINS env variable if cross-origin access is required.",
+            dev_origins
+        )
+        return dev_origins
+
     logger.warning(
-        "CORS_ALLOWED_ORIGINS not set. Using development defaults: %s. "
-        "For production, set CORS_ALLOWED_ORIGINS env variable.",
-        dev_origins
+        "CORS_ALLOWED_ORIGINS not set for %s. Same-origin requests will still work, "
+        "but no cross-origin origins are allowed.",
+        ENVIRONMENT,
     )
-    return dev_origins
+    return []
 
 CORS_ALLOWED_ORIGINS = _parse_cors_origins()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
@@ -105,6 +135,30 @@ app.include_router(export_router)
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(auth_router)
+
+
+if FRONTEND_DIST.exists():
+    @app.get("/", include_in_schema=False)
+    async def serve_frontend_root():
+        index_file = _resolve_frontend_file("")
+        if index_file:
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        if full_path.startswith(("api/", ".auth/")):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        requested_file = _resolve_frontend_file(full_path)
+        if requested_file:
+            return FileResponse(requested_file)
+
+        index_file = _resolve_frontend_file("")
+        if index_file:
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend build not found")
 
 
 # ---------------------------------------------------------------------------

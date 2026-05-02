@@ -5,7 +5,7 @@
 
 ## Overview
 
-This repository contains the runtime, frontend, and deployment assets for the EWA Analyzer application. The backend is a stateless FastAPI service that stores artifacts in Azure Blob Storage, while the SAPUI5 frontend calls backend API endpoints for analysis and export flows. The repo also keeps BTP deployment files and Azure migration documentation so the application can be deployed in either environment.
+This repository contains the runtime, frontend, and deployment assets for the EWA Analyzer application. The backend is a stateless FastAPI service that stores artifacts in Azure Blob Storage. The recommended Azure target is a single Azure Container App running a combined image that serves both the backend API and the built SAPUI5 frontend from the same origin. The repo also keeps BTP deployment files and Azure migration documentation so the application can still be deployed in either environment.
 
 ## Tech Stack
 
@@ -71,15 +71,16 @@ This repository contains the runtime, frontend, and deployment assets for the EW
 
 | File / Module | Responsibility |
 |--------------|----------------|
-| `backend/ewa_main.py` | Backend application entry point. |
+| `backend/ewa_main.py` | Backend application entry point and same-container static frontend host in Azure. |
 | `backend/workflow_orchestrator.py` | Orchestrates workflow execution. |
 | `backend/ewa_pipeline/` | Structured pipeline for indexing, analysis, reporting, tracking, and orchestration. |
 | `backend/core/azure_clients.py` | Azure client setup and service wiring. |
 | `backend/core/runtime_config.py` | Runtime configuration loading. |
+| `backend/core/entra_auth.py` | JWT validation and optional Container Apps platform-auth header parsing. |
 | `backend/routers/` | API routes for health, auth, storage, export, chat, and AI operations. |
-| `backend/utils/excel_workbook_builder.py` | Workbook generation helpers. |
-| `backend/utils/ewa_dispatcher.py` | Dispatch logic for EWA processing. |
 | `sapui5/webapp/` | SAPUI5 frontend application source. |
+| `Dockerfile.containerapp` | Combined frontend and backend image build for Azure Container Apps. |
+| `.github/workflows/deploy-to-containerapp.yml` | GitHub Actions deployment workflow for the Container App target. |
 | `docs/AZURE_MIGRATION_GUIDE.md` | Azure migration runbook. |
 | `docs/RUNTIME_ARCHITECTURE.md` | Runtime shape and environment variable reference. |
 | `mta.yaml` | BTP deployment descriptor. |
@@ -90,3 +91,5 @@ This repository contains the runtime, frontend, and deployment assets for the EW
 | Date | Decision | Rationale | Alternatives Considered |
 |------|----------|-----------|------------------------|
 | 2026-05-01 | Initial memory system setup | Consistent session handoffs | None |
+| 2026-05-02 | Use one Azure Container App for both frontend and backend | Lowest operational complexity, same-origin requests, and scale-to-zero cost profile | Split Azure Web Apps, Static Web Apps plus API |
+| 2026-05-02 | Use Container Apps built-in Entra auth with trusted platform headers | Avoids adding a separate frontend token acquisition flow for the current Azure target | Pure bearer-token SPA flow |

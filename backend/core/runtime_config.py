@@ -37,3 +37,5 @@ AUTH_ENABLED = _get_bool(
     "AUTH_ENABLED",
     ENVIRONMENT not in {"local", "development", "dev"},
 )
+
+TRUST_PLATFORM_AUTH_HEADERS = _get_bool("TRUST_PLATFORM_AUTH_HEADERS", False)

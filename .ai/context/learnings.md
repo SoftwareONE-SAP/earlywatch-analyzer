@@ -10,7 +10,8 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 <!-- Things about the external APIs or SDKs used in this project that are non-obvious. -->
 
-- *(none yet)*
+- `az containerapp auth update` supports `--enabled true`, `--unauthenticated-client-action RedirectToLoginPage`, and `--proxy-convention Standard` for the built-in auth path.
+- `az containerapp update --set-env-vars` accepts `secretref:` values when Container App secrets are configured separately.
 
 ---
 
@@ -18,7 +19,8 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 <!-- Approaches, patterns, or idioms that have proven effective in this codebase. -->
 
-- *(none yet)*
+- The lowest-friction Azure target for this repo is one Container App that serves both the FastAPI backend and built SAPUI5 frontend from the same origin.
+- Container Apps built-in Microsoft Entra auth plus `TRUST_PLATFORM_AUTH_HEADERS=true` avoids adding a separate SPA token-acquisition flow.
 
 ---
 
@@ -26,7 +28,7 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 <!-- Things tried that didn't work and why, so you don't repeat the same mistakes. -->
 
-- *(none yet)*
+- Treating the repo as blocked on a missing `config.yaml` was incorrect. `backend/ewa_pipeline/config.py` already falls back to environment-based configuration when no file exists.
 
 ---
 
@@ -34,7 +36,8 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 <!-- Non-obvious setup steps, environment variables, local dev gotchas. -->
 
-- *(none yet)*
+- In production, leaving `CORS_ALLOWED_ORIGINS` unset now means same-origin only. Development localhost defaults are used only when `ENVIRONMENT` is local or dev.
+- The local workspace used in this session does not have Docker on PATH, so image build validation must happen elsewhere unless Docker is installed.
 
 ---
 

@@ -412,9 +412,6 @@
         if (host === 'localhost' || host === '127.0.0.1') {
           return 'http://localhost:8001';
         }
-        if (host.indexOf('azurewebsites.net') !== -1) {
-          return 'https://sap-ewa-analyzer-backend.azurewebsites.net';
-        }
         return '';
       }
       const apiBaseUrl = detectApiBaseUrl();
