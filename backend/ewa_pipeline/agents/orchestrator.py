@@ -86,8 +86,8 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
     Nodes are closures — they capture config, cost_tracker, and LLM chains.
     Call graph.stream(initial_state) to run with streaming event output.
     """
-    medium_deployment = config.azure_openai.deployments.medium
-    big_deployment = config.azure_openai.deployments.big
+    specialist_deployment = config.azure_openai.deployments.specialist
+    orchestrator_deployment = config.azure_openai.deployments.orchestrator
 
     planner_chain = get_orchestrator_model(config).with_structured_output(
         OrchestratorPlan, include_raw=True
@@ -122,7 +122,7 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
             [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
         )
         inp, out = _tokens(result.get("raw"))
-        cost_tracker.record("phase0_planning", big_deployment, inp, out)
+        cost_tracker.record("phase0_planning", orchestrator_deployment, inp, out)
 
         plan: OrchestratorPlan = result["parsed"]
         return {
@@ -175,7 +175,7 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
         try:
             result = domain_chain.invoke([HumanMessage(content=prompt)])
             inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase1_domain_analysis", medium_deployment, inp, out)
+            cost_tracker.record("phase1_domain_analysis", specialist_deployment, inp, out)
             da: DomainAnalysis = result["parsed"]
             return {"domain_analyses": [da]}
         except Exception as exc:
@@ -199,7 +199,7 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
         try:
             result = xref_chain.invoke([HumanMessage(content=prompt)])
             inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase2_cross_reference", big_deployment, inp, out)
+            cost_tracker.record("phase2_cross_reference", orchestrator_deployment, inp, out)
             xref_list: CrossReferenceList = result["parsed"]
             return {"cross_references": xref_list.items}
         except Exception:
@@ -238,7 +238,7 @@ Write the final synthesis:
                 [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
             inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase2_synthesis", big_deployment, inp, out)
+            cost_tracker.record("phase2_synthesis", orchestrator_deployment, inp, out)
             synthesis: SynthesisResult = result["parsed"]
             return {
                 "executive_summary": synthesis.executive_summary,

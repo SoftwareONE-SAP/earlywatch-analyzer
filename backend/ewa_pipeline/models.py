@@ -4,7 +4,7 @@ from ewa_pipeline.config import Config
 
 def get_orchestrator_model(config: Config) -> AzureChatOpenAI:
     return AzureChatOpenAI(
-        azure_deployment=config.azure_openai.deployments.big,
+        azure_deployment=config.azure_openai.deployments.orchestrator,
         azure_endpoint=config.azure_openai.endpoint,
         api_key=config.azure_openai.api_key,
         api_version=config.azure_openai.api_version,
@@ -16,7 +16,7 @@ def get_orchestrator_model(config: Config) -> AzureChatOpenAI:
 
 def get_subagent_model(config: Config) -> AzureChatOpenAI:
     return AzureChatOpenAI(
-        azure_deployment=config.azure_openai.deployments.medium,
+        azure_deployment=config.azure_openai.deployments.specialist,
         azure_endpoint=config.azure_openai.endpoint,
         api_key=config.azure_openai.api_key,
         api_version=config.azure_openai.api_version,
@@ -28,7 +28,7 @@ def get_subagent_model(config: Config) -> AzureChatOpenAI:
 
 def get_cross_ref_model(config: Config) -> AzureChatOpenAI:
     return AzureChatOpenAI(
-        azure_deployment=config.azure_openai.deployments.big,
+        azure_deployment=config.azure_openai.deployments.orchestrator,
         azure_endpoint=config.azure_openai.endpoint,
         api_key=config.azure_openai.api_key,
         api_version=config.azure_openai.api_version,
@@ -39,4 +39,4 @@ def get_cross_ref_model(config: Config) -> AzureChatOpenAI:
 
 
 def get_indexer_model_name(config: Config) -> str:
-    return f"azure/{config.azure_openai.deployments.small}"
+    return f"azure/{config.azure_openai.deployments.router}"

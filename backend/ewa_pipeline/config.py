@@ -5,9 +5,9 @@ import yaml
 
 
 class DeploymentsConfig(BaseModel):
-    big: str
-    medium: str
-    small: str
+    orchestrator: str
+    specialist: str
+    router: str
 
 
 class AzureConfig(BaseModel):
@@ -71,35 +71,21 @@ def _build_env_config() -> Config:
     api_key = _first_env("AZURE_OPENAI_API_KEY")
     api_version = _first_env("AZURE_OPENAI_API_VERSION") or "2025-03-01-preview"
 
-    big_deployment = _first_env(
-        "V2_DEEP_MODEL",
-        "AZURE_OPENAI_SUMMARY_MODEL",
-        "AZURE_OPENAI_CHAT_MODEL",
-    )
-    medium_deployment = _first_env(
-        "V2_SPECIALIST_MODEL",
-        "AZURE_OPENAI_PARAM_MODEL",
-        "AZURE_OPENAI_CHAT_MODEL",
-        "AZURE_OPENAI_SUMMARY_MODEL",
-    )
-    small_deployment = _first_env(
-        "V2_ROUTER_MODEL",
-        "AZURE_OPENAI_FAST_MODEL",
-        "AZURE_OPENAI_CHAT_MODEL",
-        "AZURE_OPENAI_SUMMARY_MODEL",
-    )
+    orchestrator_deployment = _first_env("V2_ORCHESTRATOR_MODEL")
+    specialist_deployment = _first_env("V2_SPECIALIST_MODEL")
+    router_deployment = _first_env("V2_ROUTER_MODEL")
 
     missing = []
     if not endpoint:
         missing.append("AZURE_OPENAI_ENDPOINT")
     if not api_key:
         missing.append("AZURE_OPENAI_API_KEY")
-    if not big_deployment:
-        missing.append("V2_DEEP_MODEL or AZURE_OPENAI_SUMMARY_MODEL")
-    if not medium_deployment:
-        missing.append("V2_SPECIALIST_MODEL or AZURE_OPENAI_PARAM_MODEL")
-    if not small_deployment:
-        missing.append("V2_ROUTER_MODEL or AZURE_OPENAI_FAST_MODEL")
+    if not orchestrator_deployment:
+        missing.append("V2_ORCHESTRATOR_MODEL")
+    if not specialist_deployment:
+        missing.append("V2_SPECIALIST_MODEL")
+    if not router_deployment:
+        missing.append("V2_ROUTER_MODEL")
 
     if missing:
         missing_list = ", ".join(missing)
@@ -108,7 +94,7 @@ def _build_env_config() -> Config:
             f"Missing: {missing_list}."
         )
 
-    pageindex_model = _first_env("PAGEINDEX_MODEL") or f"azure/{small_deployment}"
+    pageindex_model = _first_env("PAGEINDEX_MODEL") or f"azure/{router_deployment}"
 
     return Config.model_validate(
         {
@@ -117,9 +103,9 @@ def _build_env_config() -> Config:
                 "api_key": api_key,
                 "api_version": api_version,
                 "deployments": {
-                    "big": big_deployment,
-                    "medium": medium_deployment,
-                    "small": small_deployment,
+                    "orchestrator": orchestrator_deployment,
+                    "specialist": specialist_deployment,
+                    "router": router_deployment,
                 },
             },
             "pageindex": {

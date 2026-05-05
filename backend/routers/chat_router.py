@@ -64,12 +64,7 @@ async def chat_with_document(
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
         api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        # Prefer summary/fast model names used elsewhere in the backend; fall back to legacy var
-        model_name = (
-            os.getenv("AZURE_OPENAI_SUMMARY_MODEL")
-            or os.getenv("AZURE_OPENAI_FAST_MODEL")
-            or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
-        )
+        model_name = os.getenv("V2_ORCHESTRATOR_MODEL", "gpt-4.1")
         logger.info("Azure endpoint set: %s, model: %s", bool(azure_endpoint), model_name)
 
         if not api_key or not azure_endpoint:
