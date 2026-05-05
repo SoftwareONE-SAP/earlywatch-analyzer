@@ -21,6 +21,7 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 - The lowest-friction Azure target for this repo is one Container App that serves both the FastAPI backend and built SAPUI5 frontend from the same origin.
 - Container Apps built-in Microsoft Entra auth plus `TRUST_PLATFORM_AUTH_HEADERS=true` avoids adding a separate SPA token-acquisition flow.
+- For npm security-update failures in this repo, patch the smallest controlling manifest first, regenerate only that package lockfile with `npm install --package-lock-only`, and verify with `npm audit --json` before widening scope.
 
 ---
 
@@ -29,6 +30,7 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 <!-- Things tried that didn't work and why, so you don't repeat the same mistakes. -->
 
 - Treating the repo as blocked on a missing `config.yaml` was incorrect. `backend/ewa_pipeline/config.py` already falls back to environment-based configuration when no file exists.
+- npm overrides did not fully penetrate the shrinkwrapped `@sap/audit-logging` subtree inside `@sap/approuter` 14.x; that slice required bumping `@sap/approuter` itself to a newer release line.
 
 ---
 
@@ -45,4 +47,4 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 
 <!-- Known debugging techniques or tools that work well for this project. -->
 
-- *(none yet)*
+- `npm audit --json` can stay red after a root dependency override if a nested vendor package resolves its own vulnerable copy; inspect `package-lock.json` for the remaining path before assuming the first override worked.
