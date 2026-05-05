@@ -5,6 +5,12 @@
   "devDependencies": {
     "@sap/html5-app-deployer": "^7.2.3"
   },
+  "overrides": {
+    "@sap/html5-app-deployer": {
+      "axios": "1.16.0",
+      "file-type": "21.3.2"
+    }
+  },
   "scripts": {
     "start": "node node_modules/@sap/html5-app-deployer/index.js"
   }
