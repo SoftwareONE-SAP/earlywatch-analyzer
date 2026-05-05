@@ -2,7 +2,7 @@ FROM node:20-alpine AS frontend-build
 WORKDIR /app/sapui5
 
 COPY sapui5/package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY sapui5/ ./
 RUN npm run build
