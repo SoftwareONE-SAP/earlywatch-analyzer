@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "UI Deployer for SAP EWA Analyzer",
   "devDependencies": {
-    "@sap/html5-app-deployer": "^2"
+    "@sap/html5-app-deployer": "^7.2.3"
   },
   "scripts": {
     "start": "node node_modules/@sap/html5-app-deployer/index.js"

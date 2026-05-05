@@ -7,7 +7,7 @@
     "build": "ui5 build --clean-dest --dest dist && node zip-build.js"
   },
   "devDependencies": {
-    "@ui5/cli": "^3.0.0",
+    "@ui5/cli": "^4.0.52",
     "adm-zip": "^0.5.10"
   }
 }
