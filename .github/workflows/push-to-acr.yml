@@ -1,12 +1,6 @@
 name: Build and Push Docker Images to ACR
 
 on:
-  push:
-    branches:
-      - main
-      - fiori-migration
-      - anthropic
-      - alert-driven-workflow
   workflow_dispatch:
 
 jobs:
