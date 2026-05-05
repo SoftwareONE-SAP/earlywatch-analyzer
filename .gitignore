@@ -15,9 +15,6 @@ mta_archives/
 *.mta
 ui-deployer/resources/
 sapui5/dist/
-approuter/package-lock.json
-sapui5/package-lock.json
-ui-deployer/package-lock.json
 
 # Local/generated analysis artifacts
 graphify-out/
