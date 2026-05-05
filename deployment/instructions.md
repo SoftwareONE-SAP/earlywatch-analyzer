@@ -104,8 +104,6 @@ Use GitHub Actions to build the combined image and update the Container App on e
 ### Required GitHub Secrets
 
 - `ACR_LOGIN_SERVER`
-- `REGISTRY_USERNAME`
-- `REGISTRY_PASSWORD`
 - `AZURE_CREDENTIALS`
 - `AZURE_RESOURCE_GROUP`
 - `AZURE_CONTAINER_APP_NAME`

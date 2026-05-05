@@ -193,8 +193,6 @@ Create these GitHub repository secrets:
 | Secret | Purpose |
 | --- | --- |
 | `ACR_LOGIN_SERVER` | Example: `myregistry.azurecr.io`. |
-| `REGISTRY_USERNAME` | ACR username or service principal username. |
-| `REGISTRY_PASSWORD` | ACR password or service principal password. |
 | `AZURE_CREDENTIALS` | JSON credentials for `azure/login`. |
 | `AZURE_RESOURCE_GROUP` | Resource group containing Web Apps. |
 | `AZURE_BACKEND_WEBAPP_NAME` | Backend Web App name. |
@@ -212,6 +210,7 @@ az ad sp create-for-rbac `
 
 Store the JSON output as the `AZURE_CREDENTIALS` secret.
 
+The workflow now reads the ACR admin credentials at runtime from Azure, so you do not need to store `REGISTRY_USERNAME` or `REGISTRY_PASSWORD` in GitHub.
 Push to the `azure-migration` branch or run the workflow manually.
 
 ## 12. Verification Checklist
