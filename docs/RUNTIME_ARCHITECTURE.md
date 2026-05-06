@@ -17,8 +17,6 @@ This is the minimum runtime context for the current Azure-only target.
 - `backend/`: FastAPI API service. In the combined deployment it also serves the built SAPUI5 assets when `sapui5/dist/` is present.
 - `sapui5/`: SAPUI5 frontend source. In Azure it is built into static assets and served from the same origin as the API.
 
-Legacy SAP BTP artifacts may still exist in the repository, but they are not part of the active Azure runtime.
-
 ## Persistent State
 
 The backend does not use a database. All persistent state is stored in Azure Blob Storage:

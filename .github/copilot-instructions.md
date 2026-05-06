@@ -17,9 +17,6 @@ This project contains the backend, frontend, and deployment assets for the EWA A
 .
 ├── README.md
 ├── docker-compose.yml
-├── mta.yaml
-├── mtaext.example.yaml
-├── xs-security.json
 ├── .github/
 │   ├── copilot-instructions.md
 │   └── workflows/
@@ -48,13 +45,7 @@ This project contains the backend, frontend, and deployment assets for the EWA A
 │   ├── README.md
 │   ├── package.json
 │   └── webapp/
-├── approuter/
-│   ├── package.json
-│   └── xs-app.json
-├── ui-deployer/
-│   └── package.json
 └── scripts/
-	└── deploy-local-btp.ps1
 ```
 
 ## AI Memory System
@@ -75,6 +66,6 @@ This project uses a structured session memory system. Context files live in `.ai
 
 - Backend runtime state is stored in Azure Blob Storage, not a database.
 - `sapui5/webapp/model/config.js` and `sapui5/webapp/chat.html` contain the backend URL and must stay aligned.
-- Keep real secrets out of source files; use Azure Web App settings, Key Vault, GitHub Actions secrets, or BTP deployment secrets.
-- Keep Azure deployment artifacts aligned with the Container Apps path; legacy SAP BTP files are not part of the supported deployment path.
+- Keep real secrets out of source files; use Azure Container App settings, Key Vault, or GitHub Actions secrets.
+- Keep deployment artifacts aligned with the Azure Container Apps path.
 - Treat `backend/ewa_pipeline/` as the newer structured analysis pipeline and `backend/` root modules as the app entry/service layer.

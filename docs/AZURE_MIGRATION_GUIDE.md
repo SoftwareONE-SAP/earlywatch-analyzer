@@ -25,7 +25,6 @@ This keeps the frontend and backend on the same origin, removes the need for a s
 - [ ] Identify the target Azure subscription, resource group, and region.
 - [ ] Rotate any credentials that were ever stored in plaintext files.
 - [ ] Confirm no real secrets will be copied into source-controlled files.
-- [ ] Confirm this is an Azure-only deployment with no BTP fallback requirement.
 
 ### 2. Confirm Runtime Expectations
 
@@ -76,7 +75,7 @@ Rotate any credentials that were ever present in local plaintext files before de
 - ACR credentials
 - Azure credentials if still used
 
-Do not copy `mtaext.yaml`, `.env`, or other local config files into source control.
+Do not copy local config files such as `.env` into source control.
 
 ## 2. Azure Resources To Create
 
@@ -113,7 +112,7 @@ az containerapp env create --name $caEnv --resource-group $rg --location $locati
 az containerapp create --name $app --resource-group $rg --environment $caEnv `
   ## Legacy Notes
 
-  Older Azure Web Apps and SAP BTP migration snippets have been removed from the active runbook.
+  Older Azure Web Apps migration snippets have been removed from the active runbook.
 
 ## 8. Validation Checklist
 
@@ -142,10 +141,6 @@ Workflow pushes image but app does not update:
 
 - Confirm `AZURE_CONTAINER_APP_NAME` and `AZURE_CONTAINERAPPS_ENVIRONMENT` secrets are correct.
 - Confirm the ACR credentials in GitHub match the registry attached to the Container App.
-
-## Legacy Notes
-
-Legacy SAP BTP deployment assets may still exist in the repository, but they are not part of the supported Azure deployment path.
 
 ```powershell
 $acrLoginServer = az acr show --resource-group $rg --name $acr --query loginServer -o tsv
@@ -234,10 +229,6 @@ Operational:
 - Confirm ACR has both image repositories.
 - Confirm Web Apps restart cleanly.
 - Confirm model deployment names match Azure OpenAI deployment names, not generic model names.
-
-## Legacy Notes
-
-Legacy SAP BTP deployment assets may still exist in the repository, but they are not part of the supported Azure deployment path.
 
 ## 14. Common Failures
 

@@ -13,7 +13,7 @@
 - Audited the backend for dead code paths and removed legacy modules that were not used by any live entry point.
   - Deleted dead agent code under `backend/agent/`.
   - Deleted dead utilities under `backend/utils/` that were only referenced by the removed agent path.
-  - Deleted dead `backend/converters/pdf_markdown_converter.py` and BTP-specific middleware/config under `backend/core/`.
+  - Deleted dead `backend/converters/pdf_markdown_converter.py` and legacy middleware/config under `backend/core/`.
 - Removed legacy prompt and schema assets that were only referenced by deleted code.
   - Kept `backend/prompts/chat_system_prompt.md` because it is still used by `backend/routers/chat_router.py`.
 - Trimmed `backend/core/runtime_config.py` to keep only live runtime settings.
@@ -26,7 +26,7 @@
 ## What Is In Progress
 
 - The Azure migration runbook in `deployment/instructions.md` is still being expanded with deployment steps.
-- The next major code task is to address the missing `config.yaml` story for `backend/ewa_pipeline/` before deploying to Azure Web Apps for Containers.
+- The next major code task is to address the missing `config.yaml` story for `backend/ewa_pipeline/` before the next Azure container deployment.
 - `deployment/instructions.md` still needs to be aligned with the trimmed runtime configuration once the deployment scripts are finalized.
 
 ---
@@ -56,7 +56,7 @@
 ## Blockers & Open Questions
 
 - `backend/ewa_pipeline/config.py` still depends on a missing `config.yaml`, so the pipeline will fail on first analysis call until that configuration source is added.
-- The deployment flow still needs a final pass to ensure the Azure App Service and ACR scripts are fully aligned with the trimmed runtime.
+- The deployment flow still needs a final pass to ensure the Azure deployment scripts are fully aligned with the trimmed runtime.
 
 ---
 

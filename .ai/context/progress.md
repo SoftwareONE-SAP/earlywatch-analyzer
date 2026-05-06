@@ -4,7 +4,7 @@
 
 ## Active Task
 
-Repository cleanup is complete, the Azure deployment path remains the supported target, and the remaining npm Dependabot blockers in `sapui5`, `ui-deployer`, and `approuter` have been cleared.
+Repository cleanup is complete, the Azure deployment path remains the supported target, and the remaining npm Dependabot blockers in the removed legacy package directories were cleared before the repository was normalized to the Azure-only layout.
 
 ## Completed (Recent)
 
@@ -21,8 +21,7 @@ Repository cleanup is complete, the Azure deployment path remains the supported 
 | 2026-05-02 | Added `Dockerfile.containerapp` and `.github/workflows/deploy-to-containerapp.yml` |
 | 2026-05-02 | Rewrote Azure deployment docs for the single-Container-App target |
 | 2026-05-05 | Cleared `sapui5` npm audit blockers by upgrading `@ui5/cli` to `^4.0.52` |
-| 2026-05-05 | Cleared `ui-deployer` npm audit blockers by upgrading `@sap/html5-app-deployer` to `^7.2.3` and forcing patched `axios` and `file-type` via npm overrides |
-| 2026-05-05 | Cleared `approuter` npm audit blockers by upgrading `@sap/approuter` to `^21.4.0` after nested overrides failed against a shrinkwrapped dependency tree |
+| 2026-05-05 | Cleared the remaining legacy package npm audit blockers before the repository was normalized to the Azure-only layout |
 
 ## Blocked
 
@@ -33,4 +32,4 @@ Repository cleanup is complete, the Azure deployment path remains the supported 
 1. Add the required GitHub Actions secrets and bootstrap the Azure Container App in the target subscription.
 2. Run the first real Container Apps deployment and verify Microsoft Entra sign-in, Blob storage access, and analysis/export flows.
 3. If stricter secret handling is required, move sensitive runtime values from plain Container App environment variables to Container App secrets or Key Vault references.
-4. Confirm the GitHub Dependabot/security-update reruns turn green with the refreshed `sapui5`, `ui-deployer`, and `approuter` lockfiles.
+4. Validate the Azure-only deployment path end to end in the target subscription.

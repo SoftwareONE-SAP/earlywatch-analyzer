@@ -9,13 +9,11 @@ This folder contains the Azure runtime and deployment assets needed to run the E
 - `.github/workflows/`: current CI/CD workflows.
 - `.env.example`: sanitized runtime config template.
 
-Legacy SAP BTP files may still be present in the repo, but they are not part of the active Azure deployment path.
-
 ## Secret Handling
 
 Do not commit real secrets. Keep real values in GitHub Actions secrets, Azure Key Vault, or Azure Container App settings.
 
-Before migration, rotate any credentials that were previously present in local files such as `mtaext.yaml`.
+Before migration, rotate any credentials that were previously present in local files.
 
 ## Local Checks
 

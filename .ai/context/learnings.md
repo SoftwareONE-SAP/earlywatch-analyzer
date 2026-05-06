@@ -30,7 +30,6 @@ Technical gotchas, API quirks, and patterns specific to this codebase. Updated d
 <!-- Things tried that didn't work and why, so you don't repeat the same mistakes. -->
 
 - Treating the repo as blocked on a missing `config.yaml` was incorrect. `backend/ewa_pipeline/config.py` already falls back to environment-based configuration when no file exists.
-- npm overrides did not fully penetrate the shrinkwrapped `@sap/audit-logging` subtree inside `@sap/approuter` 14.x; that slice required bumping `@sap/approuter` itself to a newer release line.
 
 ---
 

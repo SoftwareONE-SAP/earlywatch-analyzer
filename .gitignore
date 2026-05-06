@@ -13,7 +13,6 @@ build/
 mta_archives/
 *.mtar
 *.mta
-ui-deployer/resources/
 sapui5/dist/
 
 # Local/generated analysis artifacts
