@@ -17,22 +17,40 @@ from starlette.responses import JSONResponse
 
 from core.runtime_config import (
     AUTH_ENABLED,
+    ENTRA_ADMIN_ROLE_VALUES,
     ENTRA_API_AUDIENCE,
     ENTRA_API_CLIENT_ID,
     ENTRA_ISSUER,
     ENTRA_TENANT_ID,
+    ENTRA_VIEWER_ROLE_VALUES,
     ENVIRONMENT,
     TRUST_PLATFORM_AUTH_HEADERS,
 )
 
 logger = logging.getLogger(__name__)
 
-VIEWER_ROLE = "Viewer"
-ADMIN_ROLE = "Administrator"
+VIEWER_ROLE = ENTRA_VIEWER_ROLE_VALUES[0]
+ADMIN_ROLE = ENTRA_ADMIN_ROLE_VALUES[0]
 VIEWER_OR_ADMIN = (VIEWER_ROLE, ADMIN_ROLE)
 
 _PUBLIC_PATHS = frozenset({"/", "/health", "/api/ping"})
 _KEY_CACHE_SECONDS = 3600
+
+
+def _normalize_role_name(role: str) -> str:
+    return role.strip().casefold()
+
+
+def _normalized_role_set(roles: list[str] | tuple[str, ...]) -> set[str]:
+    return {
+        normalized_role
+        for normalized_role in (_normalize_role_name(role) for role in roles)
+        if normalized_role
+    }
+
+
+_VIEWER_ROLE_MATCHES = _normalized_role_set(ENTRA_VIEWER_ROLE_VALUES)
+_ADMIN_ROLE_MATCHES = _normalized_role_set(ENTRA_ADMIN_ROLE_VALUES)
 
 
 def _auth_configured() -> bool:
@@ -298,6 +316,15 @@ def _development_user() -> dict[str, Any]:
     }
 
 
+def _expand_allowed_roles(allowed_roles: tuple[str, ...]) -> set[str]:
+    normalized_allowed_roles = _normalized_role_set(allowed_roles)
+    if _normalize_role_name(VIEWER_ROLE) in normalized_allowed_roles:
+        normalized_allowed_roles.update(_VIEWER_ROLE_MATCHES)
+    if _normalize_role_name(ADMIN_ROLE) in normalized_allowed_roles:
+        normalized_allowed_roles.update(_ADMIN_ROLE_MATCHES)
+    return normalized_allowed_roles
+
+
 def current_user(request: Request) -> dict[str, Any]:
     user = getattr(request.state, "user", None)
     if user:
@@ -312,16 +339,20 @@ def current_user(request: Request) -> dict[str, Any]:
 
 
 def require_roles(*allowed_roles: str) -> Callable[[Request], dict[str, Any]]:
+    normalized_allowed_roles = _expand_allowed_roles(allowed_roles)
+
     def dependency(request: Request) -> dict[str, Any]:
         user = current_user(request)
-        user_roles = set(user.get("roles") or [])
-        if user_roles.intersection(allowed_roles):
+        raw_user_roles = [str(role) for role in (user.get("roles") or []) if str(role).strip()]
+        user_roles = _normalized_role_set(raw_user_roles)
+        if user_roles.intersection(normalized_allowed_roles):
             return user
         logger.warning(
-            "User %s lacks required role(s) %s in environment %s",
+            "User %s lacks required role(s) %s in environment %s; received roles=%s",
             user.get("email") or user.get("id"),
-            allowed_roles,
+            sorted(normalized_allowed_roles),
             ENVIRONMENT,
+            raw_user_roles,
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

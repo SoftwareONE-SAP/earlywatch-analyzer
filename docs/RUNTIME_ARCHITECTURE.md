@@ -65,6 +65,8 @@ Direct JWT validation variables remain available for deployments where the front
 | `ENTRA_API_CLIENT_ID` | API app registration client ID. |
 | `ENTRA_API_AUDIENCE` | Optional custom audience override. |
 | `ENTRA_ISSUER` | Optional issuer override. |
+| `ENTRA_VIEWER_ROLE_VALUES` | Optional comma-separated viewer role values accepted from Entra claims. Defaults to `Viewer`. |
+| `ENTRA_ADMIN_ROLE_VALUES` | Optional comma-separated administrator role values accepted from Entra claims. Defaults to `Administrator`. |
 
 Optional Anthropic-on-Azure variables:
 
@@ -81,7 +83,8 @@ Optional Anthropic-on-Azure variables:
 
 - The recommended Azure path is Container Apps built-in Microsoft Entra authentication plus same-origin frontend hosting.
 - The backend can read authenticated user claims from `X-MS-CLIENT-PRINCIPAL*` headers when `TRUST_PLATFORM_AUTH_HEADERS=true`.
-- The application expects Entra app roles named `Viewer` and `Administrator` for route authorization.
+- The application defaults to Entra app role values `Viewer` and `Administrator` for route authorization.
+- If your Entra app role display names are correct but the emitted role values differ, set `ENTRA_VIEWER_ROLE_VALUES` and `ENTRA_ADMIN_ROLE_VALUES` to the actual values that appear in the token or `X-MS-CLIENT-PRINCIPAL` header.
 - If you choose a bearer-token SPA flow instead, keep `TRUST_PLATFORM_AUTH_HEADERS=false` and configure the `ENTRA_*` JWT settings.
 
 ## Known Deployment Risks
