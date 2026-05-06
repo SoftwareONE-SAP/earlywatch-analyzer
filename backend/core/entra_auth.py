@@ -37,20 +37,7 @@ _PUBLIC_PATHS = frozenset({"/", "/health", "/api/ping"})
 _KEY_CACHE_SECONDS = 3600
 
 
-def _normalize_role_name(role: str) -> str:
-    return role.strip().casefold()
-
-
-def _normalized_role_set(roles: list[str] | tuple[str, ...]) -> set[str]:
-    return {
-        normalized_role
-        for normalized_role in (_normalize_role_name(role) for role in roles)
-        if normalized_role
-    }
-
-
-_VIEWER_ROLE_MATCHES = _normalized_role_set(ENTRA_VIEWER_ROLE_VALUES)
-_ADMIN_ROLE_MATCHES = _normalized_role_set(ENTRA_ADMIN_ROLE_VALUES)
+# Role-based authorization has been removed. Authentication is sufficient.
 
 
 def _auth_configured() -> bool:
@@ -311,18 +298,8 @@ def _development_user() -> dict[str, Any]:
         "id": "local-development-user",
         "email": "local@example.com",
         "name": "Local Development User",
-        "roles": [VIEWER_ROLE, ADMIN_ROLE],
         "tenant_id": ENTRA_TENANT_ID or "local",
     }
-
-
-def _expand_allowed_roles(allowed_roles: tuple[str, ...]) -> set[str]:
-    normalized_allowed_roles = _normalized_role_set(allowed_roles)
-    if _normalize_role_name(VIEWER_ROLE) in normalized_allowed_roles:
-        normalized_allowed_roles.update(_VIEWER_ROLE_MATCHES)
-    if _normalize_role_name(ADMIN_ROLE) in normalized_allowed_roles:
-        normalized_allowed_roles.update(_ADMIN_ROLE_MATCHES)
-    return normalized_allowed_roles
 
 
 def current_user(request: Request) -> dict[str, Any]:
@@ -338,25 +315,8 @@ def current_user(request: Request) -> dict[str, Any]:
     )
 
 
-def require_roles(*allowed_roles: str) -> Callable[[Request], dict[str, Any]]:
-    normalized_allowed_roles = _expand_allowed_roles(allowed_roles)
-
+def require_auth() -> Callable[[Request], dict[str, Any]]:
+    """Require the user to be authenticated. No role checks."""
     def dependency(request: Request) -> dict[str, Any]:
-        user = current_user(request)
-        raw_user_roles = [str(role) for role in (user.get("roles") or []) if str(role).strip()]
-        user_roles = _normalized_role_set(raw_user_roles)
-        if user_roles.intersection(normalized_allowed_roles):
-            return user
-        logger.warning(
-            "User %s lacks required role(s) %s in environment %s; received roles=%s",
-            user.get("email") or user.get("id"),
-            sorted(normalized_allowed_roles),
-            ENVIRONMENT,
-            raw_user_roles,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient role",
-        )
-
+        return current_user(request)
     return dependency

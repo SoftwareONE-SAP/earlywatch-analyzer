@@ -12,7 +12,7 @@ import os
 from fastapi import APIRouter, HTTPException, Response, Depends
 
 from core.azure_clients import blob_service_client
-from core.entra_auth import VIEWER_OR_ADMIN, require_roles
+from core.entra_auth import require_auth
 from services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ storage_service = StorageService()
 @router.get("/export-excel")
 async def export_json_to_excel(
     blob_name: str,
-    _user: dict = Depends(require_roles(*VIEWER_OR_ADMIN)),
+    _user: dict = Depends(require_auth()),
 ):
     """Export an existing workbook artifact."""
     if not blob_service_client:

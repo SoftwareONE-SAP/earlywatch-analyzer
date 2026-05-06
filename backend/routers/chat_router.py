@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from services.storage_service import StorageService
-from core.entra_auth import VIEWER_OR_ADMIN, require_roles
+from core.entra_auth import require_auth
 from core.runtime_config import CHAT_HISTORY_LIMIT, CHAT_MAX_OUTPUT_TOKENS
 
 # Lazy import AzureOpenAI only when needed to avoid cost at module load
@@ -44,7 +44,7 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat_with_document(
     request: ChatRequest,
-    _user: dict = Depends(require_roles(*VIEWER_OR_ADMIN)),
+    _user: dict = Depends(require_auth()),
 ):
     """Chat with a processed EWA Markdown document using Azure OpenAI GPT models."""
     # DEBUG: Log incoming request summary

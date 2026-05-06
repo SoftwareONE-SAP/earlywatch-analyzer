@@ -27,7 +27,7 @@ from core.azure_clients import (
 )
 from services.storage_service import StorageService
 from workflow_orchestrator import EWAWorkflowOrchestrator
-from core.entra_auth import ADMIN_ROLE, VIEWER_OR_ADMIN, require_roles
+from core.entra_auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,8 @@ async def upload_file(
     system_id: str = Form(...),
     start_date: str = Form(...),
     end_date: str = Form(...),
-    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+    _user: dict = Depends(require_auth()),
+):
 ):
     """Upload a ZIP file, convert contained HTML to Markdown, and store in Azure Blob with provided metadata."""
 
@@ -297,7 +298,7 @@ async def upload_file(
 # ------------------------- List endpoint ------------------------- #
 
 @router.get("/files")
-async def list_files(_user: dict = Depends(require_roles(*VIEWER_OR_ADMIN))):
+async def list_files(_user: dict = Depends(require_auth())):
     """List all files stored in Azure Blob Storage with their processing status and sequential processing opportunities."""
 
     if not blob_service_client:
@@ -452,7 +453,7 @@ class DeleteAnalysisResponse(BaseModel):
 @router.delete("/delete-analysis", response_model=DeleteAnalysisResponse)
 async def delete_analysis(
     request_data: DeleteAnalysisRequest,
-    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+    _user: dict = Depends(require_auth()),
 ):
     """Delete an analysis and all related files from Azure Blob Storage."""
     
@@ -519,7 +520,7 @@ async def delete_analysis(
 @router.get("/download/{blob_name}")
 async def download_file(
     blob_name: str,
-    _user: dict = Depends(require_roles(*VIEWER_OR_ADMIN)),
+    _user: dict = Depends(require_auth()),
 ):
     """Download a file from Azure Blob Storage."""
 

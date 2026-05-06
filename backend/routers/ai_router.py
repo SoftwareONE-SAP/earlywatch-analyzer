@@ -22,7 +22,7 @@ from core.azure_clients import (
     AZURE_STORAGE_CONTAINER_NAME,
 )
 from workflow_orchestrator import ewa_orchestrator
-from core.entra_auth import ADMIN_ROLE, require_roles
+from core.entra_auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,8 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
 @router.post("/process-and-analyze")
 async def process_and_analyze_document_endpoint(
     request: ProcessAnalyzeRequest,
-    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+    _user: dict = Depends(require_auth()),
+):
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
@@ -130,7 +131,8 @@ async def process_and_analyze_document_endpoint(
 @router.post("/analyze-ai")
 async def analyze_document_with_ai_endpoint(
     request: BlobNameRequest,
-    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+    _user: dict = Depends(require_auth()),
+):
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
@@ -177,7 +179,8 @@ async def analyze_document_with_ai_endpoint(
 @router.post("/reprocess-ai")
 async def reprocess_document_with_ai(
     request: BlobNameRequest,
-    _user: dict = Depends(require_roles(ADMIN_ROLE)),
+    _user: dict = Depends(require_auth()),
+):
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
