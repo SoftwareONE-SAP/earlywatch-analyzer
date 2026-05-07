@@ -162,7 +162,6 @@ async def upload_file(
     end_date: str = Form(...),
     _user: dict = Depends(require_auth()),
 ):
-):
     """Upload a ZIP file, convert contained HTML to Markdown, and store in Azure Blob with provided metadata."""
 
     if not blob_service_client:
