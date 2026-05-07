@@ -467,6 +467,10 @@ sap.ui.define([
             })
                 .then(response => {
                     if (!response.ok) {
+                        if (response.status === 504) {
+                            // Long-running jobs can hit gateway timeout while continuing server-side.
+                            throw new Error("PROCESS_TIMEOUT_504");
+                        }
                         return response.json().then(data => {
                             throw new Error(data.detail || "Processing request failed");
                         }).catch(() => {
@@ -487,7 +491,7 @@ sap.ui.define([
                 .catch(err => {
                     console.error("Processing error:", err);
                     // "Failed to fetch" usually means timeout - refresh to check actual status
-                    if (err.message === "Failed to fetch") {
+                    if (err.message === "Failed to fetch" || err.message === "PROCESS_TIMEOUT_504") {
                         MessageToast.show("Request timed out. Checking status...");
                         this._loadFiles();
                     } else {
