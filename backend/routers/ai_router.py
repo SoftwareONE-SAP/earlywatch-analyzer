@@ -13,7 +13,7 @@ import os
 import logging
 from typing import Dict, Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from models import BlobNameRequest
 from models.request_models import ProcessAnalyzeRequest
 
@@ -177,6 +177,7 @@ async def analyze_document_with_ai_endpoint(
 @router.post("/reprocess-ai")
 async def reprocess_document_with_ai(
     request: BlobNameRequest,
+    background_tasks: BackgroundTasks,
     _user: dict = Depends(require_auth()),
 ):
     if not blob_service_client:
@@ -186,22 +187,36 @@ async def reprocess_document_with_ai(
     logger.info("[REPROCESS] Starting reprocess for %s", original_blob_name)
 
     try:
-        result = await _run_processing_flow(original_blob_name)
-        if not result.get("success", False):
-            error_msg = result.get("error_hint") or result.get("message", "Unknown error")
-            logger.warning("[REPROCESS] Workflow failed: %s", error_msg)
-            raise HTTPException(status_code=result.get("status_code", 500), detail=error_msg)
+        # If a run is already in-flight, return a non-error response and let the client poll status.
+        try:
+            blob_client = blob_service_client.get_blob_client(
+                container=AZURE_STORAGE_CONTAINER_NAME,
+                blob=original_blob_name,
+            )
+            props = await asyncio.to_thread(blob_client.get_blob_properties)
+            metadata = dict(props.metadata or {})
+            if metadata.get("processing", "").lower() == "true":
+                return {
+                    "success": True,
+                    "started": False,
+                    "message": "Re-analysis is already running for this file.",
+                    "original_file": original_blob_name,
+                }
+        except Exception as meta_err:
+            logger.warning("[REPROCESS] Could not read processing metadata before enqueue: %s", meta_err)
 
-        logger.info("[REPROCESS] Re-analysis completed successfully for %s", original_blob_name)
+        # Set metadata immediately so UI polling reflects in-progress state right away.
+        await ewa_orchestrator.set_processing_flag(original_blob_name, True)
+        await ewa_orchestrator._set_workflow_status_metadata(original_blob_name, "processing")
+
+        background_tasks.add_task(_run_processing_flow, original_blob_name)
+
+        logger.info("[REPROCESS] Re-analysis queued for %s", original_blob_name)
         return {
             "success": True,
-            "message": "Agentic re-analysis completed successfully.",
-            "workbook_file": result.get("workbook_file"),
-            "workbook_payload_file": result.get("workbook_payload_file"),
-            "usage_file": result.get("usage_file"),
-            "total_findings": result.get("total_findings", 0),
-            "total_parameters": result.get("total_parameters", 0),
-            "supplemental_findings": result.get("supplemental_findings", 0),
+            "started": True,
+            "message": "Re-analysis started. Status will update automatically.",
+            "original_file": original_blob_name,
         }
     except HTTPException:
         raise

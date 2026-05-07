@@ -482,7 +482,7 @@ sap.ui.define([
                 .then(data => {
                     console.log("Process response:", data);
                     if (data.success) {
-                        MessageToast.show("Re-analysis completed successfully for " + oFile.name);
+                        MessageToast.show(data.message || ("Re-analysis started for " + oFile.name));
                     } else {
                         throw new Error(data.message || "Processing failed");
                     }
