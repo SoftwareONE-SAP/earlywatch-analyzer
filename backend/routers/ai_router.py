@@ -105,18 +105,44 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
 @router.post("/process-and-analyze")
 async def process_and_analyze_document_endpoint(
     request: ProcessAnalyzeRequest,
+    background_tasks: BackgroundTasks,
     _user: dict = Depends(require_auth()),
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
     try:
-        result = await _run_processing_flow(request.blob_name)
-        if not result.get("success", False):
-            raise HTTPException(
-                status_code=result.get("status_code", 500),
-                detail=result.get("error_hint") or result.get("message", "Workflow failed"),
+        blob_name = request.blob_name
+
+        # If a run is already in-flight, return a non-error response and let the client poll status.
+        try:
+            blob_client = blob_service_client.get_blob_client(
+                container=AZURE_STORAGE_CONTAINER_NAME,
+                blob=blob_name,
             )
-        return result
+            props = await asyncio.to_thread(blob_client.get_blob_properties)
+            metadata = dict(props.metadata or {})
+            if metadata.get("processing", "").lower() == "true":
+                return {
+                    "success": True,
+                    "started": False,
+                    "message": "Processing is already running for this file.",
+                    "original_file": blob_name,
+                }
+        except Exception as meta_err:
+            logger.warning("[PROCESS] Could not read processing metadata before enqueue: %s", meta_err)
+
+        # Set metadata immediately so UI polling reflects in-progress state right away.
+        await ewa_orchestrator.set_processing_flag(blob_name, True)
+        await ewa_orchestrator._set_workflow_status_metadata(blob_name, "processing")
+
+        background_tasks.add_task(_run_processing_flow, blob_name)
+
+        return {
+            "success": True,
+            "started": True,
+            "message": "Processing started. Status will update automatically.",
+            "original_file": blob_name,
+        }
     except HTTPException:
         raise
     except Exception as e:
