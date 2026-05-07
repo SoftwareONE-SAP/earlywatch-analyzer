@@ -5,7 +5,7 @@ Deterministic Excel workbook generator for EWA analysis results.
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report.schemas import AnalysisResult, CrossReference, DomainAnalysis, Finding
@@ -15,16 +15,24 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 _F_HDR  = "Cambria"   # header font
 _F_BODY = "Calibri"   # body font
-_SZ     = 11          # body size (headers inherit this size)
+_SZ     = 11          # body size
 
-_C_HDR_BG  = "4472C4"
-_C_HDR_FG  = "FFFFFF"
-_C_ALT     = "F2F2F2"
-_C_LINK    = "4472C4"
+_C_HDR_BG   = "4472C4"
+_C_HDR_FG   = "FFFFFF"
+_C_ALT      = "F2F2F2"
+_C_LINK     = "4472C4"
+_C_TITLE_BG = "1F4E79"
+_C_BORDER   = "BFBFBF"
 
-_SEV_BG = {"Critical": "FF0000", "High": "FF6600", "Medium": "FFCC00", "Low": "70AD47"}
+_SEV_BG = {"Critical": "C00000", "High": "ED7D31", "Medium": "FFC000", "Low": "548235"}
 _SEV_FG = {"Critical": "FFFFFF", "High": "FFFFFF", "Medium": "000000", "Low": "FFFFFF"}
-_HEALTH_BG = {"Critical": "FF0000", "Warning": "FF8C00", "Healthy": "70AD47"}
+_HEALTH_BG = {"Critical": "C00000", "Warning": "ED7D31", "Healthy": "548235"}
+
+# Tab colours
+_TAB_EXEC = _C_TITLE_BG
+_TAB_XREF = "7030A0"
+_TAB_REM  = "2E75B6"
+_TAB_UTIL = "808080"
 
 _NUM = '#,##0'
 
@@ -42,72 +50,142 @@ def _fill(hex_color):
 def _align(h="left", v="center", wrap=False):
     return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
 
-def _hdr_row(ws, row, values, bg=_C_HDR_BG, fg=_C_HDR_FG):
-    for col, val in enumerate(values, 1):
+def _border_bottom(color=_C_BORDER):
+    return Border(bottom=Side(style="thin", color=color))
+
+def _apply_app_style(ws, *, hide_headers=False, zoom=110):
+    """Hide gridlines (and optionally row/col headers) and set zoom."""
+    ws.sheet_view.showGridLines = False
+    if hide_headers:
+        ws.sheet_view.showRowColHeaders = False
+    ws.sheet_view.zoomScale = zoom
+
+def _hdr_row(ws, row, values, bg=_C_HDR_BG, fg=_C_HDR_FG, start_col=1):
+    for i, val in enumerate(values):
+        col = start_col + i
         c = ws.cell(row=row, column=col, value=val)
         c.font = _hdr_font(color=fg)
         c.fill = _fill(bg)
         c.alignment = _align(h="center")
+        c.border = _border_bottom()
 
 def _sheet_ref(name: str) -> str:
     import re as _re
     return f"'{name}'" if _re.search(r"[^A-Za-z0-9_]", name) else name
 
-def _autofit_columns(ws, min_width=8, max_width=55):
+def _autofit_columns(ws, min_width=8, max_width=55, skip_cols=()):
     """Set column widths based on longest content in each column."""
     col_widths: dict[int, float] = {}
     for row in ws.iter_rows():
         for cell in row:
-            if cell.value is None:
+            if cell.value is None or cell.column in skip_cols:
                 continue
             col = cell.column
-            # For wrapped/long text cap the contribution so one cell doesn't dominate
             length = min(len(str(cell.value)), max_width)
             if length > col_widths.get(col, 0):
                 col_widths[col] = length
     for col, length in col_widths.items():
         ws.column_dimensions[get_column_letter(col)].width = max(min_width, length + 2)
 
+def _kpi_tile(ws, top_left, bottom_right, label, value, bg, fg="FFFFFF"):
+    """Card-style KPI tile across a merged cell range."""
+    ws.merge_cells(f"{top_left}:{bottom_right}")
+    c = ws[top_left]
+    c.value = f"{label}\n{value}"
+    c.fill = _fill(bg)
+    c.font = Font(name=_F_HDR, bold=True, size=18, color=fg)
+    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
 def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     ws = wb.create_sheet("Executive Summary")
+    _apply_app_style(ws, hide_headers=True, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_EXEC
 
-    # Title
-    ws.merge_cells("A1:G1")
-    c = ws["A1"]
+    # Margin columns A and I
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["I"].width = 2
+
+    # Aggregate KPI counts
+    totals = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    for da in result.domain_analyses:
+        for f in da.findings:
+            if f.severity in totals:
+                totals[f.severity] += 1
+    total_findings = sum(totals.values())
+
+    # Title band
+    ws.row_dimensions[1].height = 40
+    ws.merge_cells("B1:H1")
+    c = ws["B1"]
     c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
-    c.font = _hdr_font(size=14)
-    c.fill = _fill(_C_HDR_BG)
+    c.font = Font(name=_F_HDR, bold=True, size=18, color="FFFFFF")
+    c.fill = _fill(_C_TITLE_BG)
     c.alignment = _align(h="center")
 
-    # Overall health
+    # Health banner
     health = result.overall_system_health
-    ws.merge_cells("A2:G2")
-    c = ws["A2"]
-    c.value = f"Overall System Health: {health}"
-    c.font = _hdr_font(size=12)
+    ws.row_dimensions[2].height = 28
+    ws.merge_cells("B2:H2")
+    c = ws["B2"]
+    c.value = f"Overall System Health:  {str(health).upper()}"
+    c.font = Font(name=_F_HDR, bold=True, size=13, color="FFFFFF")
     c.fill = _fill(_HEALTH_BG.get(health, "888888"))
     c.alignment = _align(h="center")
 
-    # Top 5 Priority Actions label
-    ws.cell(row=4, column=1, value="Top 5 Priority Actions").font = _hdr_font(color="000000")
+    # Spacer
+    ws.row_dimensions[3].height = 10
 
+    # KPI tile band — rows 4-6
+    ws.row_dimensions[4].height = 18
+    ws.row_dimensions[5].height = 30
+    ws.row_dimensions[6].height = 12
+
+    _kpi_tile(ws, "B4", "C6", "TOTAL FINDINGS", total_findings, _C_TITLE_BG)
+    _kpi_tile(ws, "D4", "D6", "CRITICAL",       totals["Critical"], _SEV_BG["Critical"])
+    _kpi_tile(ws, "E4", "E6", "HIGH",           totals["High"],     _SEV_BG["High"])
+    _kpi_tile(ws, "F4", "F6", "MEDIUM",         totals["Medium"],   _SEV_BG["Medium"], fg="000000")
+    _kpi_tile(ws, "G4", "G6", "LOW",            totals["Low"],      _SEV_BG["Low"])
+
+    # Spacer
+    ws.row_dimensions[7].height = 10
+
+    # Top 5 Priority Actions header
+    r = 8
+    c = ws.cell(row=r, column=2, value="Top 5 Priority Actions")
+    c.font = Font(name=_F_HDR, bold=True, size=13, color=_C_TITLE_BG)
+    c.border = _border_bottom(_C_TITLE_BG)
+    ws.merge_cells(f"B{r}:H{r}")
+    for col in range(2, 9):
+        ws.cell(row=r, column=col).border = _border_bottom(_C_TITLE_BG)
+    ws.row_dimensions[r].height = 22
+
+    r += 1
     for i, action in enumerate(result.top_5_priority_actions, 1):
-        r = 4 + i
-        ws.cell(row=r, column=1, value=f"{i}.").font = _font(bold=True)
-        c = ws.cell(row=r, column=2, value=action)
+        ws.cell(row=r, column=2, value=f"{i}").font = _font(bold=True, color=_C_TITLE_BG, size=12)
+        ws.cell(row=r, column=2).alignment = _align(h="center", v="top")
+        c = ws.cell(row=r, column=3, value=action)
         c.font = _font()
-        c.alignment = _align(wrap=True)
-        ws.merge_cells(f"B{r}:G{r}")
-        ws.row_dimensions[r].height = 52
+        c.alignment = _align(wrap=True, v="top")
+        ws.merge_cells(f"C{r}:H{r}")
+        if i % 2 == 1:
+            for col in range(2, 9):
+                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
+        ws.row_dimensions[r].height = 50
+        r += 1
+
+    # Spacer
+    ws.row_dimensions[r].height = 10
+    r += 1
 
     # Section table
-    tbl_hdr_row = 4 + len(result.top_5_priority_actions) + 2
+    tbl_hdr_row = r
     col_headers = ["Section", "Health", "Findings", "Critical", "High", "Medium", "Low"]
-    _hdr_row(ws, tbl_hdr_row, col_headers)
+    _hdr_row(ws, tbl_hdr_row, col_headers, start_col=2)
+    ws.row_dimensions[tbl_hdr_row].height = 24
     ws.freeze_panes = f"A{tbl_hdr_row + 1}"
-    ws.auto_filter.ref = f"A{tbl_hdr_row}:{get_column_letter(7)}{tbl_hdr_row}"
+    ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
     r = tbl_hdr_row + 1
     for idx, da in enumerate(result.domain_analyses):
@@ -116,40 +194,42 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         sname = sheet_map[da.section_id]
         ref = _sheet_ref(sname)
 
-        lc = ws.cell(row=r, column=1, value=da.section_title)
+        lc = ws.cell(row=r, column=2, value=da.section_title)
         lc.hyperlink = f"#'{sname}'!A1"
         lc.font = _font(color=_C_LINK)
 
-        hc = ws.cell(row=r, column=2, value=da.overall_health)
-        hc.fill = _fill(_HEALTH_BG.get(da.overall_health, "888888"))
+        hc = ws.cell(row=r, column=3, value=da.overall_health)
         hc.font = _font(bold=True, color="FFFFFF")
         hc.alignment = _align(h="center")
 
         sev_col = "B"
         data_range = f"{ref}!${sev_col}$3:${sev_col}$9999"
-        ws.cell(row=r, column=3, value=f"=COUNTA({ref}!$A$3:$A$9999)")
-        ws.cell(row=r, column=4, value=f'=COUNTIF({data_range},"Critical")')
-        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"High")')
-        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"Medium")')
-        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"Low")')
+        ws.cell(row=r, column=4, value=f"=COUNTA({ref}!$A$3:$A$9999)")
+        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"Critical")')
+        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"High")')
+        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"Medium")')
+        ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"Low")')
 
-        for col in range(3, 8):
+        for col in range(4, 9):
             ws.cell(row=r, column=col).alignment = _align(h="center")
             ws.cell(row=r, column=col).font = _font()
 
         if idx % 2 == 0:
-            for col in range(1, 8):
+            for col in range(2, 9):
                 ws.cell(row=r, column=col).fill = _fill(_C_ALT)
-        # Health colour always painted last so it overrides the alt shade on col 2
+        # Health colour overrides alt shade
         hc.fill = _fill(_HEALTH_BG.get(da.overall_health, "888888"))
 
+        ws.row_dimensions[r].height = 22
         r += 1
 
-    _autofit_columns(ws, min_width=8, max_width=45)
+    _autofit_columns(ws, min_width=8, max_width=45, skip_cols=(1, 9))
 
 
 def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     ws = wb.create_sheet(sheet_name)
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _HEALTH_BG.get(da.overall_health, _TAB_UTIL)
 
     COLS = ["ID", "Severity", "Title", "Description", "Evidence",
             "Impact", "Action", "Transactions", "Effort", "Priority"]
@@ -163,6 +243,7 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
 
     # Row 2: column headers
     _hdr_row(ws, 2, COLS)
+    ws.row_dimensions[2].height = 24
     ws.freeze_panes = "A3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(COLS))}2"
 
@@ -179,7 +260,6 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
             c.font = _font()
             c.alignment = _align(wrap=(col in (4, 5, 6, 7)))
 
-        # Alt shade all columns first, then severity colour overwrites col 2
         if i % 2 == 1:
             for col in range(1, len(COLS) + 1):
                 ws.cell(row=r, column=col).fill = _fill(_C_ALT)
@@ -194,9 +274,12 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
 
 def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
     ws = wb.create_sheet("Cross-References")
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_XREF
 
     COLS = ["Title", "Related Findings", "Correlation", "Combined Impact", "Recommended Action"]
     _hdr_row(ws, 1, COLS)
+    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(5)}1"
 
@@ -222,9 +305,12 @@ def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
 
 def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
     ws = wb.create_sheet("Remediation Plan")
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_REM
 
     COLS = ["Finding ID", "Section", "Severity", "Title", "Action", "Transactions", "Effort", "Priority"]
     _hdr_row(ws, 1, COLS)
+    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(8)}1"
 
@@ -248,7 +334,6 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
             c.font = _font()
             c.alignment = _align(wrap=(col in (5, 6)))
 
-        # Alt shade all columns first, then severity colour overwrites col 3
         if i % 2 == 1:
             for col in range(1, len(COLS) + 1):
                 ws.cell(r, col).fill = _fill(_C_ALT)
@@ -263,8 +348,11 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
 
 def _build_document_structure(wb: Workbook, tree: dict):
     ws = wb.create_sheet("Document Structure")
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_UTIL
 
     _hdr_row(ws, 1, ["Title", "Pages", "Summary", "Depth"])
+    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
 
     row = [2]
@@ -294,8 +382,11 @@ def _build_document_structure(wb: Workbook, tree: dict):
 
 def _build_token_usage(wb: Workbook, usage: TokenUsage):
     ws = wb.create_sheet("Token Usage")
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_UTIL
 
     _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Output Tokens", "Total Tokens"])
+    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
 
     data_rows = [
@@ -364,6 +455,9 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     if tree:
         _build_document_structure(wb, tree)
     _build_token_usage(wb, result.token_usage)
+
+    # Open on the dashboard
+    wb.active = 0
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
