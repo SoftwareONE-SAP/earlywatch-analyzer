@@ -41,3 +41,14 @@ class StorageService:
             return blob_client.download_blob().readall()
         except ResourceNotFoundError:
             raise FileNotFoundError(f"File {filename} not found in storage") from None
+
+    def upload_text_content(self, filename: str, content: str, content_type: str = "application/json") -> None:
+        """Upload UTF-8 text content to a blob in the main container."""
+        if not blob_service_client:
+            raise RuntimeError("Azure Blob Service client not initialized")
+
+        blob_client = blob_service_client.get_blob_client(
+            container=AZURE_STORAGE_CONTAINER_NAME,
+            blob=filename,
+        )
+        blob_client.upload_blob(content.encode("utf-8"), overwrite=True, content_type=content_type)

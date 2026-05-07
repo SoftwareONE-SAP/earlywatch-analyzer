@@ -32,6 +32,9 @@ def _get_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 CHAT_HISTORY_LIMIT = _get_int("CHAT_HISTORY_LIMIT", 10)
 CHAT_MAX_OUTPUT_TOKENS = _get_int("CHAT_MAX_OUTPUT_TOKENS", 4096)
+CHAT_NODE_CANDIDATE_LIMIT = _get_int("CHAT_NODE_CANDIDATE_LIMIT", 6)
+CHAT_NODE_CONTEXT_CHARS = _get_int("CHAT_NODE_CONTEXT_CHARS", 45000)
+CHAT_NODE_TEXT_SCAN_CHARS = _get_int("CHAT_NODE_TEXT_SCAN_CHARS", 2000)
 
 # Azure runtime and Entra ID authentication
 ENVIRONMENT = os.getenv("ENVIRONMENT", "local").strip().lower()
