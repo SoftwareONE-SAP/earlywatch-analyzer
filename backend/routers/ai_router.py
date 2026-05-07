@@ -107,7 +107,6 @@ async def process_and_analyze_document_endpoint(
     request: ProcessAnalyzeRequest,
     _user: dict = Depends(require_auth()),
 ):
-):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
     try:
@@ -132,7 +131,6 @@ async def process_and_analyze_document_endpoint(
 async def analyze_document_with_ai_endpoint(
     request: BlobNameRequest,
     _user: dict = Depends(require_auth()),
-):
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
@@ -180,7 +178,6 @@ async def analyze_document_with_ai_endpoint(
 async def reprocess_document_with_ai(
     request: BlobNameRequest,
     _user: dict = Depends(require_auth()),
-):
 ):
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized.")
