@@ -184,7 +184,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     col_headers = ["Section", "Health", "Findings", "Critical", "High", "Medium", "Low"]
     _hdr_row(ws, tbl_hdr_row, col_headers, start_col=2)
     ws.row_dimensions[tbl_hdr_row].height = 24
-    ws.freeze_panes = f"A{tbl_hdr_row + 1}"
     ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
     r = tbl_hdr_row + 1
