@@ -15,12 +15,15 @@ For each section, provide:
 - section_title: the section title exactly as shown
 - analysis_focus: 1-2 sentences describing WHAT to look for in that section
   (e.g. specific thresholds, metric comparisons, known SAP gotchas for that domain)
+- skill_name: the skill to use, selected from the skill catalog
+- reference_ids: the smallest set of reference IDs needed for this section
 
 ## Rules
 - Include ALL substantive technical sections (hardware, workload, database, memory, security, configuration, etc.)
 - Skip non-technical sections: table of contents, cover page, glossary, index, contact information
 - Order tasks with the most critical/complex sections first (they run first)
 - Use your SAP domain knowledge to write targeted analysis_focus hints
+- Do not request every reference by default. Pick only the references relevant to each section.
 
 ## Document Tree
 {tree_summary}
@@ -28,8 +31,8 @@ For each section, provide:
 ## Available Sections
 {sections}
 
-## SAP Domain Reference (excerpt)
-{skills_excerpt}
+## Available Skill Catalog
+{skills_catalog}
 
 Return a JSON object with:
 - tasks: list of section analysis tasks (ordered by priority)
@@ -43,13 +46,13 @@ Section: {section_title}
 Section ID: {section_id}
 Analysis Focus: {analysis_focus}
 
-## SAP Domain Reference
-{skills_excerpt}
+## Selected Skill Context
+{skill_context}
 
 ## Instructions
 
 1. Read the section content carefully — extract ALL numerical values, percentages, status indicators
-2. Compare each metric against standard SAP thresholds (Critical/Warning/Healthy)
+2. Compare each metric against standard SAP thresholds in the selected skill context when present
 3. The analysis_focus above tells you what to prioritise — look for those patterns first
 4. Create one finding per discrete issue — do not bundle unrelated problems
 5. Use evidence from the text — always quote specific numbers

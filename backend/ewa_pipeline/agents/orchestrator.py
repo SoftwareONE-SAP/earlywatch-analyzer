@@ -27,6 +27,7 @@ from ewa_pipeline.tracking.cost_tracker import CostTracker
 from ewa_pipeline.report.schemas import (
     DomainAnalysis, CrossReferenceList, OrchestratorPlan, SynthesisResult,
 )
+from .skill_loader import SkillRegistry
 from .prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     ORCHESTRATOR_PLANNING_PROMPT,
@@ -42,7 +43,7 @@ class EwaAnalysisState(TypedDict):
     tree_summary: str
     sections_available: list[dict]       # [{id, title, summary}] — for planner
     sections_content: dict[str, str]     # section_id → markdown content
-    skills_content: str
+    skills_catalog: str
 
     # After planner node
     section_tasks: list[dict]            # [{section_id, section_title, analysis_focus}]
@@ -79,7 +80,11 @@ def _derive_health(analyses: list[DomainAnalysis]) -> str:
 
 # ── Graph factory ─────────────────────────────────────────────────────────────
 
-def build_ewa_graph(config: Config, cost_tracker: CostTracker):
+def build_ewa_graph(
+    config: Config,
+    cost_tracker: CostTracker,
+    skill_registry: SkillRegistry,
+):
     """
     Compile and return the LangGraph EWA analysis graph.
 
@@ -116,7 +121,7 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
         prompt = ORCHESTRATOR_PLANNING_PROMPT.format(
             tree_summary=state["tree_summary"],
             sections=sections_text,
-            skills_excerpt=state["skills_content"][:2000],
+            skills_catalog=state["skills_catalog"],
         )
         result = planner_chain.invoke(
             [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
@@ -153,7 +158,8 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
                 "section_id": sid,
                 "section_title": title_lookup.get(sid, task.get("section_title", sid)),
                 "content": state["sections_content"].get(sid, ""),
-                "skills_content": state["skills_content"],
+                "skill_name": task.get("skill_name") or "ewa-analysis",
+                "reference_ids": task.get("reference_ids") or [],
                 "analysis_focus": task.get("analysis_focus", ""),
             }))
         return sends
@@ -165,11 +171,28 @@ def build_ewa_graph(config: Config, cost_tracker: CostTracker):
         Analyse a single section. Runs in parallel — one invocation per Send.
         Returns {"domain_analyses": [da]} which is accumulated via operator.add.
         """
+        reference_ids = task.get("reference_ids") or []
+        if not reference_ids:
+            reference_ids = skill_registry.suggest_references(
+                task.get("skill_name") or "ewa-analysis",
+                " ".join(
+                    [
+                        task.get("section_title", ""),
+                        task.get("analysis_focus", ""),
+                        task.get("content", "")[:1200],
+                    ]
+                ),
+            )
+        skill_context = skill_registry.resolve_context(
+            task.get("skill_name") or "ewa-analysis",
+            reference_ids,
+            fallback_text="No specific skill context was selected for this section.",
+        )
         prompt = DOMAIN_ANALYST_PROMPT.format(
             section_title=task["section_title"],
             section_id=task["section_id"],
             content=task["content"],
-            skills_excerpt=task["skills_content"][:3000],
+            skill_context=skill_context,
             analysis_focus=task["analysis_focus"],
         )
         try:

@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 
@@ -7,6 +7,8 @@ class SectionPlanItem(BaseModel):
     section_id: str
     section_title: str
     analysis_focus: str
+    skill_name: str | None = None
+    reference_ids: list[str] = Field(default_factory=list)
 
 
 class OrchestratorPlan(BaseModel):

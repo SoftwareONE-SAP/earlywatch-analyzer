@@ -11,23 +11,9 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 from ewa_pipeline.report.schemas import AnalysisResult, DomainAnalysis
 from ewa_pipeline.services.progress import ProgressCallback, ProgressReporter
 from .orchestrator import EwaAnalysisState, build_ewa_graph
+from .skill_loader import SkillRegistry
 
 console = Console()
-
-
-def _load_skills(skills_dir: Path) -> str:
-    """Read skills/ewa-analysis/SKILL.md and any reference files into one string."""
-    if not skills_dir.exists():
-        return ""
-    parts: list[str] = []
-    skill_md = skills_dir / "ewa-analysis" / "SKILL.md"
-    if skill_md.exists():
-        parts.append(skill_md.read_text(encoding="utf-8"))
-    refs_dir = skills_dir / "ewa-analysis" / "references"
-    if refs_dir.exists():
-        for ref in sorted(refs_dir.glob("*.md")):
-            parts.append(ref.read_text(encoding="utf-8"))
-    return "\n\n---\n\n".join(parts)
 
 
 # Annotated[list, operator.add] fields — merged by appending, not overwriting
@@ -56,7 +42,8 @@ def run_analysis(
 
     # ── Build initial state ───────────────────────────────────────────────────
 
-    skills_content = _load_skills(skills_dir)
+    skill_registry = SkillRegistry.from_dir(skills_dir)
+    skills_catalog = skill_registry.catalog_text()
     sections_available = [
         {"id": node.id, "title": node.title, "summary": node.summary}
         for node in sections
@@ -70,7 +57,7 @@ def run_analysis(
         "tree_summary": tree_to_summary(tree),
         "sections_available": sections_available,
         "sections_content": sections_content,
-        "skills_content": skills_content,
+        "skills_catalog": skills_catalog,
         "section_tasks": [],
         "planning_notes": "",
         "domain_analyses": [],
@@ -83,11 +70,11 @@ def run_analysis(
 
     if verbose:
         console.print(f"  Tree summary:\n{initial_state['tree_summary'][:800]}")
-        console.print(f"  Skills loaded: {len(skills_content)} chars")
+        console.print(f"  Skill catalog loaded: {len(skills_catalog)} chars")
 
     # ── Stream graph, report progress, accumulate final state ─────────────────
 
-    graph = build_ewa_graph(config, cost_tracker)
+    graph = build_ewa_graph(config, cost_tracker, skill_registry)
     total_sections = len(sections)
     analyzed_count = 0
 
