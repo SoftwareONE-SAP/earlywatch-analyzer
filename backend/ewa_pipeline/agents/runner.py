@@ -11,6 +11,7 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 from ewa_pipeline.report.schemas import AnalysisResult, DomainAnalysis
 from ewa_pipeline.services.progress import ProgressCallback, ProgressReporter
 from .orchestrator import EwaAnalysisState, build_ewa_graph
+from .provenance import enrich_domain_analysis_provenance
 from .skill_loader import SkillRegistry
 
 console = Console()
@@ -180,7 +181,10 @@ def run_analysis(
 
     # ── Build AnalysisResult from accumulated state ───────────────────────────
 
-    domain_analyses: list[DomainAnalysis] = accumulated["domain_analyses"]
+    domain_analyses: list[DomainAnalysis] = [
+        enrich_domain_analysis_provenance(analysis)
+        for analysis in accumulated["domain_analyses"]
+    ]
     cross_references = accumulated["cross_references"]
 
     p1 = cost_tracker._entries.get("phase1_domain_analysis")

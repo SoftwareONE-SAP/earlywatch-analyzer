@@ -21,6 +21,10 @@ class Remediation(BaseModel):
     sap_transactions: list[str]
     effort_estimate: Literal["Low", "Medium", "High"]
     priority: Literal["Immediate", "Short-term", "Medium-term", "Long-term"]
+    external_validation_required: bool = False
+    validation_reason: str = "No external validation required."
+    validation_query: str = ""
+    allowed_sources: list[str] = Field(default_factory=list)
 
 
 class Finding(BaseModel):
