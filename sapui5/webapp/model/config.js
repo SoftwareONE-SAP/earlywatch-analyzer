@@ -41,7 +41,8 @@ sap.ui.define([], function () {
         endpoints: {
             listFiles: "/api/files",
             upload: "/api/upload",
-            process: "/api/reprocess-ai",
+            process: "/api/process-and-analyze",
+            reprocess: "/api/reprocess-ai",
             deleteAnalysis: "/api/delete-analysis",
             getAnalysis: "/api/download/", // + blobName (for .md or .json)
             exportExcel: "/api/export-excel", // Excel export
