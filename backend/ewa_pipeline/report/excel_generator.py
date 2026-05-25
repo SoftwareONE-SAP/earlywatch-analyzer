@@ -231,7 +231,8 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     ws.sheet_properties.tabColor = _HEALTH_BG.get(da.overall_health, _TAB_UTIL)
 
     COLS = ["ID", "Severity", "Title", "Description", "Evidence",
-            "Impact", "Action", "Transactions", "Effort", "Priority"]
+            "Impact", "Action", "Transactions", "Effort", "Priority",
+            "External Validation", "Validation Reason", "Validation Query"]
 
     # Row 1: full-width back-link
     ws.merge_cells(f"A1:{get_column_letter(len(COLS))}1")
@@ -253,11 +254,14 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
             f.impact, f.remediation.action,
             ", ".join(f.remediation.sap_transactions),
             f.remediation.effort_estimate, f.remediation.priority,
+            "Required" if f.remediation.external_validation_required else "Not required",
+            f.remediation.validation_reason,
+            f.remediation.validation_query,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(wrap=(col in (4, 5, 6, 7)))
+            c.alignment = _align(wrap=(col in (4, 5, 6, 7, 12, 13)))
 
         if i % 2 == 1:
             for col in range(1, len(COLS) + 1):
@@ -307,11 +311,15 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
     _apply_app_style(ws, zoom=110)
     ws.sheet_properties.tabColor = _TAB_REM
 
-    COLS = ["Finding ID", "Section", "Severity", "Title", "Action", "Transactions", "Effort", "Priority"]
+    COLS = [
+        "Finding ID", "Section", "Severity", "Title", "Action", "Transactions",
+        "Effort", "Priority", "External Validation", "Validation Reason",
+        "Validation Query",
+    ]
     _hdr_row(ws, 1, COLS)
     ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(8)}1"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
 
     _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
     rows: list[tuple] = []
@@ -322,6 +330,9 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
                 f.id, da.section_title, f.severity, f.title,
                 f.remediation.action, ", ".join(f.remediation.sap_transactions),
                 f.remediation.effort_estimate, f.remediation.priority,
+                "Required" if f.remediation.external_validation_required else "Not required",
+                f.remediation.validation_reason,
+                f.remediation.validation_query,
             ))
     rows.sort(key=lambda x: x[0])
 
@@ -331,7 +342,7 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(wrap=(col in (5, 6)))
+            c.alignment = _align(wrap=(col in (5, 6, 10, 11)))
 
         if i % 2 == 1:
             for col in range(1, len(COLS) + 1):

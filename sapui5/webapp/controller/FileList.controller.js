@@ -449,7 +449,13 @@ sap.ui.define([
         },
 
         _processFile: function (oFile) {
-            MessageToast.show("Processing started for " + oFile.name);
+            var bIsReprocess = oFile.status === "Analyzed" || oFile.status === "completed";
+            var sEndpointKey = bIsReprocess ? "reprocess" : "process";
+            var sFallbackMessage = bIsReprocess ?
+                ("Re-analysis started for " + oFile.name) :
+                ("Processing started for " + oFile.name);
+
+            MessageToast.show(sFallbackMessage);
 
             // Optimistic update
             var oModel = this.getView().getModel("files");
@@ -460,7 +466,7 @@ sap.ui.define([
                 oModel.refresh();
             }
 
-            fetch(Config.getEndpoint("process"), {
+            fetch(Config.getEndpoint(sEndpointKey), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ blob_name: oFile.name })
@@ -482,7 +488,7 @@ sap.ui.define([
                 .then(data => {
                     console.log("Process response:", data);
                     if (data.success) {
-                        MessageToast.show(data.message || ("Re-analysis started for " + oFile.name));
+                        MessageToast.show(data.message || sFallbackMessage);
                     } else {
                         throw new Error(data.message || "Processing failed");
                     }
