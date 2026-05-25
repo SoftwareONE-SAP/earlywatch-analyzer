@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_SKILL_CONTEXT_CHARS = 8000
+
+
+@dataclass(frozen=True)
+class SkillReference:
+    id: str
+    title: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class SkillCard:
+    name: str
+    description: str
+    path: Path
+    references: tuple[SkillReference, ...]
+
+
+def _parse_frontmatter(raw_frontmatter: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    lines = raw_frontmatter.splitlines()
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
+            index += 1
+            continue
+
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if value in {">", "|", ">-", "|-"}:
+            collected: list[str] = []
+            index += 1
+            while index < len(lines):
+                continuation = lines[index]
+                if continuation and not continuation.startswith((" ", "\t")):
+                    break
+                collected.append(continuation.strip())
+                index += 1
+            metadata[key] = " ".join(part for part in collected if part).strip()
+            continue
+
+        metadata[key] = value.strip("'\"")
+        index += 1
+
+    return metadata
+
+
+def _split_frontmatter(raw: str) -> tuple[dict[str, Any], str]:
+    if not raw.startswith("---"):
+        return {}, raw.strip()
+
+    parts = raw.split("---", 2)
+    if len(parts) < 3:
+        return {}, raw.strip()
+
+    metadata = _parse_frontmatter(parts[1])
+    return metadata, parts[2].strip()
+
+
+def _reference_title(path: Path) -> str:
+    return path.stem.replace("-", " ").replace("_", " ").title()
+
+
+class SkillRegistry:
+    def __init__(self, root_dir: Path, skills: dict[str, SkillCard]):
+        self.root_dir = root_dir
+        self._skills = skills
+
+    @classmethod
+    def from_dir(cls, root_dir: Path) -> "SkillRegistry":
+        root_dir = Path(root_dir)
+        skills: dict[str, SkillCard] = {}
+        if not root_dir.exists():
+            return cls(root_dir=root_dir, skills=skills)
+
+        for skill_md in sorted(root_dir.glob("*/SKILL.md")):
+            metadata, _ = _split_frontmatter(skill_md.read_text(encoding="utf-8"))
+            name = str(metadata.get("name") or skill_md.parent.name).strip()
+            if not name:
+                continue
+
+            refs_dir = skill_md.parent / "references"
+            references: list[SkillReference] = []
+            if refs_dir.exists():
+                for ref_path in sorted(refs_dir.glob("*.md")):
+                    references.append(
+                        SkillReference(
+                            id=ref_path.stem,
+                            title=_reference_title(ref_path),
+                            path=ref_path,
+                        )
+                    )
+
+            skills[name] = SkillCard(
+                name=name,
+                description=str(metadata.get("description") or "").strip(),
+                path=skill_md,
+                references=tuple(references),
+            )
+
+        return cls(root_dir=root_dir, skills=skills)
+
+    def catalog_text(self) -> str:
+        if not self._skills:
+            return "No backend skills are available."
+
+        parts: list[str] = []
+        for skill in self._skills.values():
+            refs = ", ".join(ref.id for ref in skill.references) or "none"
+            parts.append(
+                "\n".join(
+                    [
+                        f"- skill_name: {skill.name}",
+                        f"  description: {skill.description}",
+                        f"  reference_ids: {refs}",
+                    ]
+                )
+            )
+        return "\n".join(parts)
+
+    def resolve_context(
+        self,
+        skill_name: str | None,
+        reference_ids: list[str] | tuple[str, ...] | None,
+        *,
+        fallback_text: str = "",
+        max_chars: int = DEFAULT_SKILL_CONTEXT_CHARS,
+    ) -> str:
+        skill = self._skills.get((skill_name or "").strip())
+        if skill is None:
+            return fallback_text
+
+        selected_ids = {str(ref_id).strip() for ref_id in (reference_ids or []) if ref_id}
+        reference_lookup = {ref.id: ref for ref in skill.references}
+
+        parts: list[str] = []
+        _, skill_body = _split_frontmatter(skill.path.read_text(encoding="utf-8"))
+        if skill_body:
+            parts.append(f"# Skill: {skill.name}\n\n{skill_body}")
+
+        for ref_id in sorted(selected_ids):
+            ref = reference_lookup.get(ref_id)
+            if ref is None:
+                continue
+            body = ref.path.read_text(encoding="utf-8").strip()
+            if body:
+                parts.append(f"# Reference: {ref.id}\n\n{body}")
+
+        context = "\n\n---\n\n".join(parts).strip()
+        if not context:
+            return fallback_text
+        if len(context) <= max_chars:
+            return context
+        return context[:max_chars].rstrip() + "\n\n[Skill context truncated by backend limit.]"
+
+    def suggest_references(self, skill_name: str | None, text: str) -> list[str]:
+        skill = self._skills.get((skill_name or "").strip())
+        if skill is None:
+            return []
+
+        available = {ref.id for ref in skill.references}
+        lowered = text.lower()
+        suggestions: list[str] = []
+
+        mapping = {
+            "thresholds-memory": ["memory", "buffer", "heap", "roll", "em "],
+            "thresholds-database": ["database", "hana", "oracle", "sql", "db ", "tablespace"],
+            "thresholds-performance": ["dialog", "workload", "response", "cpu", "swap", "hardware"],
+            "thresholds-batch": ["batch", "background", "job", "sm37"],
+            "thresholds-security": ["security", "sap_all", "password", "rfc", "kernel"],
+            "thresholds-operations": [
+                "spool",
+                "temse",
+                "transport",
+                "stms",
+                "dump",
+                "st22",
+                "system log",
+                "sm21",
+                "icm",
+                "enqueue",
+                "lock",
+            ],
+            "remediation-memory": ["memory", "buffer", "heap", "roll", "em "],
+            "remediation-database": ["database", "hana", "oracle", "sql", "db ", "tablespace"],
+            "remediation-batch": ["batch", "background", "job", "sm37"],
+            "remediation-security": ["security", "sap_all", "password", "rfc", "kernel"],
+            "remediation-operations": [
+                "spool",
+                "temse",
+                "transport",
+                "stms",
+                "dump",
+                "st22",
+                "system log",
+                "sm21",
+                "icm",
+                "enqueue",
+                "lock",
+            ],
+            "correlations": ["correlation", "related", "compound", "cascade"],
+        }
+        for ref_id, keywords in mapping.items():
+            if ref_id in available and any(keyword in lowered for keyword in keywords):
+                suggestions.append(ref_id)
+
+        if "core-analysis" in available:
+            suggestions.insert(0, "core-analysis")
+
+        if suggestions:
+            return list(dict.fromkeys(suggestions))
+
+        if "core-analysis" in available:
+            return ["core-analysis"]
+        return []

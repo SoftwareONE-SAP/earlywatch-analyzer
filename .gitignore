@@ -19,6 +19,7 @@ sapui5/dist/
 graphify-out/
 sapui5-graphify-out/
 **/graphify-out/
+backend/tests/tmp*/
 *.log
 recent_logs*.txt
 
