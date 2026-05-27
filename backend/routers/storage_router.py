@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 FILENAME_YEAR_CUTOFF = 30
 FILENAME_YEAR_2000_OFFSET = 2000
 FILENAME_YEAR_1900_OFFSET = 1900
+SUPPORTED_UPLOAD_EXTENSIONS = (".zip", ".pdf")
 
 # ---------------------------------------------------------------------------
 # Filename validation and metadata extraction
@@ -162,7 +163,7 @@ async def upload_file(
     end_date: str = Form(...),
     _user: dict = Depends(require_auth()),
 ):
-    """Upload a ZIP file, convert contained HTML to Markdown, and store in Azure Blob with provided metadata."""
+    """Upload a ZIP/PDF file, convert to Markdown, and store in Azure Blob with provided metadata."""
 
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized. Check server logs and .env configuration.")
@@ -171,56 +172,62 @@ async def upload_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
         
-    if not file.filename.lower().endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Only .zip files containing HTML exports are supported.")
+    file_name_lower = file.filename.lower()
+    if not file_name_lower.endswith(SUPPORTED_UPLOAD_EXTENSIONS):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .zip (HTML export) and .pdf files are supported.",
+        )
 
     try:
         import tempfile
         import zipfile
-        import asyncio
         from converters.html_markdown_converter import convert_html_to_markdown
+        from converters.pdf_markdown_converter import convert_pdf_to_markdown
         
         contents = await file.read()
         
         with tempfile.TemporaryDirectory() as temp_dir:
-            zip_path = os.path.join(temp_dir, "upload.zip")
-            with open(zip_path, "wb") as f:
+            uploaded_path = os.path.join(temp_dir, file.filename)
+            with open(uploaded_path, "wb") as f:
                 f.write(contents)
-                
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    real_temp = os.path.realpath(temp_dir)
-                    for member in zip_ref.namelist():
-                        dest = os.path.realpath(os.path.join(real_temp, member))
-                        if not (dest.startswith(real_temp + os.sep) or dest == real_temp):
-                            raise HTTPException(
-                                status_code=400,
-                                detail="Invalid ZIP archive: path traversal detected.",
-                            )
-                    zip_ref.extractall(temp_dir)
-            except zipfile.BadZipFile:
-                raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
-            
-            # Find the .htm or .html file
-            html_file_path = None
-            for root, dirs, extracted_files in os.walk(temp_dir):
-                for extracted_file in extracted_files:
-                    if extracted_file.lower().endswith(('.htm', '.html')):
-                        html_file_path = os.path.join(root, extracted_file)
+
+            if file_name_lower.endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(uploaded_path, "r") as zip_ref:
+                        real_temp = os.path.realpath(temp_dir)
+                        for member in zip_ref.namelist():
+                            dest = os.path.realpath(os.path.join(real_temp, member))
+                            if not (dest.startswith(real_temp + os.sep) or dest == real_temp):
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail="Invalid ZIP archive: path traversal detected.",
+                                )
+                        zip_ref.extractall(temp_dir)
+                except zipfile.BadZipFile:
+                    raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
+
+                # Find the .htm or .html file
+                html_file_path = None
+                for root, dirs, extracted_files in os.walk(temp_dir):
+                    for extracted_file in extracted_files:
+                        if extracted_file.lower().endswith((".htm", ".html")):
+                            html_file_path = os.path.join(root, extracted_file)
+                            break
+                    if html_file_path:
                         break
-                if html_file_path:
-                    break
-                    
-            if not html_file_path:
-                raise HTTPException(status_code=400, detail="No .htm or .html file found in the uploaded zip.")
-                
-            logger.info("Found HTML file in zip: %s", html_file_path)
-            
-            # Convert HTML to Markdown
-            markdown_content = await asyncio.to_thread(convert_html_to_markdown, html_file_path)
+
+                if not html_file_path:
+                    raise HTTPException(status_code=400, detail="No .htm or .html file found in the uploaded zip.")
+
+                logger.info("Found HTML file in zip: %s", html_file_path)
+                markdown_content = await asyncio.to_thread(convert_html_to_markdown, html_file_path)
+            else:
+                logger.info("Converting uploaded PDF to Markdown with MarkItDown: %s", uploaded_path)
+                markdown_content = await asyncio.to_thread(convert_pdf_to_markdown, uploaded_path)
             
             if not markdown_content:
-                raise HTTPException(status_code=500, detail="Failed to convert HTML to Markdown.")
+                raise HTTPException(status_code=500, detail="Failed to convert uploaded file to Markdown.")
                 
             logger.info("Successfully converted HTML to Markdown (%d bytes)", len(markdown_content))
         
@@ -238,11 +245,9 @@ async def upload_file(
             }
                 
             # Generate new filename based on extracted metadata.
-            # It returns .zip extension since the original file was .zip.
-            # We want to save the markdown as .md, so we adjust the filename.
+            # We always store the converted file as markdown.
             new_filename = generate_standardized_filename(file_metadata, file.filename)
-            # Replace .zip with .md
-            blob_name = re.sub(r'\.zip$', '.md', new_filename, flags=re.IGNORECASE)
+            blob_name = re.sub(r"\.(zip|pdf)$", ".md", new_filename, flags=re.IGNORECASE)
             
             blob_client = blob_service_client.get_blob_client(
                 container=AZURE_STORAGE_CONTAINER_NAME, blob=blob_name

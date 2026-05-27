@@ -258,7 +258,7 @@ sap.ui.define([
 
         handleTypeMissmatch: function (oEvent) {
             var sFileName = oEvent.getParameter("fileName");
-            MessageToast.show("Only ZIP files are supported" + (sFileName ? ": " + sFileName : ""));
+            MessageToast.show("Only ZIP or PDF files are supported" + (sFileName ? ": " + sFileName : ""));
         },
 
         onUploadPress: function () {
