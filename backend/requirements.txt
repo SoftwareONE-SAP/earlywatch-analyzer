@@ -27,3 +27,4 @@ rich
 pydantic>=2
 pyyaml
 click>=8
+markitdown[pdf]

@@ -33,9 +33,9 @@
                                     change=".onFileChange"
                                     typeMissmatch=".handleTypeMissmatch"
                                     style="Emphasized"
-                                    fileType="zip"
+                                    fileType="zip,pdf"
                                     width="22rem"
-                                    placeholder="Choose ZIP file..."
+                                    placeholder="Choose ZIP or PDF file..."
                                     class="sapUiSmallMarginEnd"/>
                                 <Button text="{i18n>uploadButton}" type="Emphasized" press=".onUploadPress" icon="sap-icon://upload"/>
                             </HBox>
