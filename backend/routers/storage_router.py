@@ -223,7 +223,7 @@ async def upload_file(
                 logger.info("Found HTML file in zip: %s", html_file_path)
                 markdown_content = await asyncio.to_thread(convert_html_to_markdown, html_file_path)
             else:
-                logger.info("Converting uploaded PDF to Markdown with MarkItDown: %s", uploaded_path)
+                logger.info("Converting uploaded PDF to Markdown with pymupdf4llm: %s", uploaded_path)
                 markdown_content = await asyncio.to_thread(convert_pdf_to_markdown, uploaded_path)
             
             if not markdown_content:
