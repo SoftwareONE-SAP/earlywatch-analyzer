@@ -54,22 +54,25 @@ def _print_completion(result, cost_tracker, output_path: Path, doc_name: str) ->
 @click.option("--pdf", default=None, type=click.Path(exists=True), help="Path to EWA PDF")
 @click.option("--zip", "zip_path", default=None, type=click.Path(exists=True),
               help="Path to EWA ZIP (HTML + icon assets)")
+@click.option("--doc", "doc_path", default=None, type=click.Path(exists=True),
+              help="Path to EWA Word/Word 2003 XML document")
 @click.option("--output", default="output/analysis.xlsx", show_default=True, help="Output Excel path")
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
 @click.option("--verbose", is_flag=True, help="Show detailed progress")
 @click.option("--skip-index", is_flag=True, help="Reuse existing _tree.json if present")
 @click.option("--skip-analysis", is_flag=True, help="Reuse existing _result.json (skip Phase 1+2 LLM calls)")
-def analyze(pdf: str, zip_path: str, output: str, config_path: str, verbose: bool,
+def analyze(pdf: str, zip_path: str, doc_path: str, output: str, config_path: str, verbose: bool,
             skip_index: bool, skip_analysis: bool):
     """Run the full EWA analysis pipeline (Phase 0 + Phase 1 + Phase 2 + Excel).
 
-    Accepts either a PDF (--pdf) or a ZIP containing an EWA HTML export (--zip).
-    Exactly one of --pdf / --zip must be supplied.
+    Accepts a PDF (--pdf), ZIP containing an EWA HTML export (--zip), or Word document (--doc).
+    Exactly one input must be supplied.
     """
-    if not pdf and not zip_path:
-        raise click.UsageError("Provide either --pdf or --zip.")
-    if pdf and zip_path:
-        raise click.UsageError("Only one of --pdf or --zip can be specified.")
+    provided = sum(x is not None for x in (pdf, zip_path, doc_path))
+    if provided == 0:
+        raise click.UsageError("Provide --pdf, --zip, or --doc.")
+    if provided > 1:
+        raise click.UsageError("Only one of --pdf, --zip, or --doc can be specified.")
 
     config = _load_env_and_config(config_path)
     output_path = Path(output)
@@ -89,6 +92,7 @@ def analyze(pdf: str, zip_path: str, output: str, config_path: str, verbose: boo
         output_path=output_path,
         pdf_path=Path(pdf) if pdf else None,
         zip_path=Path(zip_path) if zip_path else None,
+        input_path=Path(doc_path) if doc_path else None,
         skip_index=skip_index,
         skip_analysis=skip_analysis,
         verbose=verbose,
@@ -166,16 +170,19 @@ def web(host: str, port: int):
 @click.option("--pdf", default=None, type=click.Path(exists=True), help="Path to EWA PDF")
 @click.option("--zip", "zip_path", default=None, type=click.Path(exists=True),
               help="Path to EWA ZIP (HTML + icon assets)")
+@click.option("--doc", "doc_path", default=None, type=click.Path(exists=True),
+              help="Path to EWA Word/Word 2003 XML document")
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
-def index(pdf: str, zip_path: str, config_path: str):
+def index(pdf: str, zip_path: str, doc_path: str, config_path: str):
     """Phase 0 only: parse document and build PageIndex tree (for debugging).
 
-    Accepts either --pdf or --zip (exactly one required).
+    Accepts --pdf, --zip, or --doc (exactly one required).
     """
-    if not pdf and not zip_path:
-        raise click.UsageError("Provide either --pdf or --zip.")
-    if pdf and zip_path:
-        raise click.UsageError("Only one of --pdf or --zip can be specified.")
+    provided = sum(x is not None for x in (pdf, zip_path, doc_path))
+    if provided == 0:
+        raise click.UsageError("Provide --pdf, --zip, or --doc.")
+    if provided > 1:
+        raise click.UsageError("Only one of --pdf, --zip, or --doc can be specified.")
 
     config = _load_env_and_config(config_path)
 
@@ -202,7 +209,7 @@ def index(pdf: str, zip_path: str, config_path: str):
         console.print("[cyan]Indexing[/cyan]: building PageIndex tree from markdown (gpt-5.4-nano)...")
         tree = build_document_tree_from_md(md_path, config, data_dir)
 
-    else:
+    elif pdf:
         from ewa_pipeline.indexer.pdf_parser import parse_pdf_to_pages, parse_pdf_to_markdown
         from ewa_pipeline.indexer.tree_builder import build_document_tree
 
@@ -216,6 +223,21 @@ def index(pdf: str, zip_path: str, config_path: str):
 
         console.print("[cyan]Indexing[/cyan]: building PageIndex tree (gpt-5.4-nano)...")
         tree = build_document_tree(pdf_path, config, data_dir)
+    else:
+        from converters.compact_html_converter import convert_html_to_compact_html
+        from converters.doc_html_converter import convert_doc_to_html
+        from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
+
+        doc_file = Path(doc_path)
+        data_dir = doc_file.parent
+        compact_path = data_dir / f"{doc_file.stem}.html"
+
+        console.print(f"[cyan]Converting[/cyan]: {doc_file.name} -> compact HTML...")
+        html_path = convert_doc_to_html(doc_file, data_dir / f"{doc_file.stem}_html", prefer_word_com=False)
+        convert_html_to_compact_html(html_path, compact_path)
+
+        console.print("[cyan]Indexing[/cyan]: building HTML document structure...")
+        tree = build_document_tree_from_html(compact_path, data_dir)
 
     sections = get_analyzable_sections(tree)
     console.print(f"  Analyzable sections: {len(sections)}")

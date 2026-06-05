@@ -181,7 +181,9 @@ az webapp restart --resource-group $rg --name $frontendApp
 
 ## 11. GitHub Actions Deployment
 
-The clone includes `.github/workflows/deploy-to-azure-webapps.yml`.
+Deployments use `.github/workflows/deploy-to-containerapp.yml`.
+
+The workflow runs on push to `main` (and can be started manually via **workflow_dispatch**). It logs into Azure, builds the combined image from `Dockerfile.containerapp`, pushes to ACR, and updates the Container App.
 
 Create these GitHub repository secrets:
 
@@ -189,9 +191,9 @@ Create these GitHub repository secrets:
 | --- | --- |
 | `ACR_LOGIN_SERVER` | Example: `myregistry.azurecr.io`. |
 | `AZURE_CREDENTIALS` | JSON credentials for `azure/login`. |
-| `AZURE_RESOURCE_GROUP` | Resource group containing Web Apps. |
-| `AZURE_BACKEND_WEBAPP_NAME` | Backend Web App name. |
-| `AZURE_FRONTEND_WEBAPP_NAME` | Frontend Web App name. |
+| `AZURE_RESOURCE_GROUP` | Resource group containing the Container App and ACR. |
+| `AZURE_CONTAINER_APP_NAME` | Container App name. |
+| `AZURE_CONTAINERAPPS_ENVIRONMENT` | Container Apps environment name. |
 
 Create `AZURE_CREDENTIALS` with a service principal:
 
@@ -205,8 +207,7 @@ az ad sp create-for-rbac `
 
 Store the JSON output as the `AZURE_CREDENTIALS` secret.
 
-The workflow now reads the ACR admin credentials at runtime from Azure, so you do not need to store `REGISTRY_USERNAME` or `REGISTRY_PASSWORD` in GitHub.
-Push to the `azure-migration` branch or run the workflow manually.
+The workflow reads ACR admin credentials at runtime from Azure, so you do not need to store `REGISTRY_USERNAME` or `REGISTRY_PASSWORD` in GitHub.
 
 ## 12. Verification Checklist
 

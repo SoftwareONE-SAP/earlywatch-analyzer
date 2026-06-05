@@ -1,0 +1,57 @@
+Topic,Subtopic
+Service Data Quality and Service Readiness,
+Service Data Quality and Service Readiness,Sending EarlyWatch Alert of PRD to SAP Backbone
+Service Data Quality and Service Readiness,Configuring PRD for SAP Note Assistant
+Service Data Quality and Service Readiness,Service Preparation of PRD
+Software Configuration for PRD,
+Software Configuration for PRD,SAP Application Release - Maintenance Phases
+Software Configuration for PRD,Security Risk Due to Outdated Support Packages
+Software Configuration for PRD,Database - Maintenance Phases
+Software Configuration for PRD,Operating System(s) - Maintenance Phases
+Software Configuration for PRD,SAP Kernel Release
+Software Configuration for PRD,HANA Database Version for PR1
+Hardware Capacity,
+Workload Distribution PRD,
+Workload Distribution PRD,Workload by Application Module
+Workload Distribution PRD,DB Load Profile
+Performance Overview PRD,
+SAP System Operating PRD,
+SAP System Operating PRD,Availability based on Collector Protocols
+SAP System Operating PRD,Program Errors (ABAP Dumps)
+SAP System Operating PRD,Update Errors
+SAP System Operating PRD,Table Reorganization
+SAP System Operating PRD,Critical Number Ranges
+Security,
+Security,Maintenance Status of current SAP HANA Database Revision
+Security,SAP HANA System Privilege DATA ADMIN
+Security,SAP HANA Password Policy  *
+Security,SAP HANA Audit Trail
+Security,SAP HANA SQL Trace Level *
+Security,SAP HANA Network Settings for Internal Services  *
+Security,SAP HANA Network Settings for System Replication Communication (listeninterface)
+Security,Activation Status and Validity of User SYSTEM  *
+Security,Age of Support Packages
+Security,Default Passwords of Standard Users *
+Security,Control of the Automatic Login User SAP* *
+Security,Protection of Passwords in Database Connections *
+Security,ABAP Password Policy
+Security,RFC Gateway Security
+Security,Message Server Security  *
+Security,"Critical authorizations, which allow to do anything"
+Security,"Critical authorizations, which should not be used in production"
+Security,"Critical authorizations, which should only see very limited use in production *"
+Software Change and Transport Management of PRD,
+Software Change and Transport Management of PRD,Emergency Changes
+Software Change and Transport Management of PRD,Failed Changes
+SAP HANA Database PR1,
+SAP HANA Database PR1,SAP HANA Stability and Alerts
+SAP HANA Database PR1,SAP HANA Database Configuration
+SAP HANA Database PR1,SAP HANA Resource Consumption
+SAP HANA Database PR1,SAP HANA Workload and Performance
+SAP HANA Database PR1,Size and Growth
+SAP HANA Database PR1,Administration
+SAP HANA Database PR1,Important SAP Notes for SAP HANA
+SAP NetWeaver Gateway,
+SAP NetWeaver Gateway,MetaData Cache Activation
+SAP NetWeaver Gateway,Logging Configuration
+SAP NetWeaver Gateway,Gateway Error Logs *

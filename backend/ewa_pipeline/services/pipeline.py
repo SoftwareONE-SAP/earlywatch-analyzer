@@ -54,12 +54,27 @@ def run_pipeline(
     cost_path = output_path.parent / f"{output_path.stem}_cost.json"
 
     if input_path:
-        tree, pages, doc_name, tree_path, sections = _prepare_md_input(
-            md_path=Path(input_path),
-            config=config,
-            skip_index=skip_index,
-            reporter=reporter,
-        )
+        input_path = Path(input_path)
+        input_suffix = input_path.suffix.lower()
+        if input_suffix in {".htm", ".html"}:
+            tree, pages, doc_name, tree_path, sections = _prepare_html_input(
+                html_path=input_path,
+                skip_index=skip_index,
+                reporter=reporter,
+            )
+        elif input_suffix in {".doc", ".docx", ".xml"}:
+            tree, pages, doc_name, tree_path, sections = _prepare_doc_input(
+                doc_path=input_path,
+                skip_index=skip_index,
+                reporter=reporter,
+            )
+        else:
+            tree, pages, doc_name, tree_path, sections = _prepare_md_input(
+                md_path=input_path,
+                config=config,
+                skip_index=skip_index,
+                reporter=reporter,
+            )
     elif zip_path:
         tree, pages, doc_name, tree_path, sections = _prepare_zip_input(
             zip_path=Path(zip_path),
@@ -201,40 +216,31 @@ def _prepare_md_input(
     return tree, {}, md_path.stem, tree_path, sections
 
 
-def _prepare_zip_input(
+def _prepare_html_input(
     *,
-    zip_path: Path,
-    config: Config,
+    html_path: Path,
     skip_index: bool,
     reporter: ProgressReporter,
 ) -> tuple[dict, dict[int, str], str, Path, list]:
-    from ewa_pipeline.indexer.html_parser import parse_html_to_markdown
-    from ewa_pipeline.indexer.tree_builder import build_document_tree_from_md
-    from ewa_pipeline.indexer.zip_extractor import extract_ewa_zip
+    """Prepare pipeline input from compact semantic HTML."""
+    from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
 
-    data_dir = zip_path.parent
-    extract_dir = data_dir / f"{zip_path.stem}_html"
-    reporter.emit("extracting_input", "running", "Extracting ZIP archive", detail=zip_path.name)
-    html_path, _ = extract_ewa_zip(zip_path, extract_dir)
-    reporter.emit("extracting_input", "completed", "ZIP extracted", detail=html_path.name)
-
-    md_path = data_dir / f"{html_path.stem}.md"
+    data_dir = html_path.parent
     tree_path = data_dir / f"{html_path.stem}_tree.json"
-    if skip_index and md_path.exists():
-        reporter.emit("normalizing_document", "completed", "Reusing markdown", detail=md_path.name)
-    else:
-        reporter.emit("normalizing_document", "running", "Converting HTML to markdown", detail=html_path.name)
-        _, saved_md = parse_html_to_markdown(html_path, data_dir)
-        md_path = saved_md
-        tree_path = data_dir / f"{saved_md.stem}_tree.json"
-        reporter.emit("normalizing_document", "completed", "Markdown ready", detail=saved_md.name)
+
+    reporter.emit(
+        "normalizing_document",
+        "completed",
+        "Compact HTML loaded",
+        detail=html_path.name,
+    )
 
     if skip_index and tree_path.exists():
         reporter.emit("building_tree", "completed", "Reusing document structure", detail=tree_path.name)
         tree = json.loads(tree_path.read_text(encoding="utf-8"))
     else:
-        reporter.emit("building_tree", "running", "Building document structure", detail=md_path.name)
-        tree = build_document_tree_from_md(md_path, config, data_dir)
+        reporter.emit("building_tree", "running", "Building HTML document structure", detail=html_path.name)
+        tree = build_document_tree_from_html(html_path, data_dir)
         reporter.emit("building_tree", "completed", "Document structure ready", detail=tree_path.name)
 
     sections = get_analyzable_sections(tree)
@@ -247,6 +253,58 @@ def _prepare_zip_input(
         total=len(sections) or 1,
     )
     return tree, {}, html_path.stem, tree_path, sections
+
+
+def _prepare_doc_input(
+    *,
+    doc_path: Path,
+    skip_index: bool,
+    reporter: ProgressReporter,
+) -> tuple[dict, dict[int, str], str, Path, list]:
+    """Convert Word/Word XML to compact HTML, then prepare HTML input."""
+    from converters.compact_html_converter import convert_html_to_compact_html
+    from converters.doc_html_converter import convert_doc_to_html
+
+    data_dir = doc_path.parent
+    compact_path = data_dir / f"{doc_path.stem}.compact.html"
+    reporter.emit("normalizing_document", "running", "Converting Word document to HTML", detail=doc_path.name)
+    if not (skip_index and compact_path.exists()):
+        html_path = convert_doc_to_html(
+            doc_path,
+            data_dir / f"{doc_path.stem}_html",
+            prefer_word_com=False,
+        )
+        convert_html_to_compact_html(html_path, compact_path)
+    reporter.emit("normalizing_document", "completed", "Compact HTML ready", detail=compact_path.name)
+    return _prepare_html_input(html_path=compact_path, skip_index=skip_index, reporter=reporter)
+
+
+def _prepare_zip_input(
+    *,
+    zip_path: Path,
+    config: Config,
+    skip_index: bool,
+    reporter: ProgressReporter,
+) -> tuple[dict, dict[int, str], str, Path, list]:
+    from converters.compact_html_converter import convert_html_to_compact_html
+    from ewa_pipeline.indexer.zip_extractor import extract_ewa_zip
+
+    data_dir = zip_path.parent
+    extract_dir = data_dir / f"{zip_path.stem}_html"
+    reporter.emit("extracting_input", "running", "Extracting ZIP archive", detail=zip_path.name)
+    html_path, _ = extract_ewa_zip(zip_path, extract_dir)
+    reporter.emit("extracting_input", "completed", "ZIP extracted", detail=html_path.name)
+
+    compact_path = data_dir / f"{html_path.stem}.html"
+    tree_path = data_dir / f"{compact_path.stem}_tree.json"
+    if skip_index and compact_path.exists():
+        reporter.emit("normalizing_document", "completed", "Reusing compact HTML", detail=compact_path.name)
+    else:
+        reporter.emit("normalizing_document", "running", "Compacting HTML for LLM input", detail=html_path.name)
+        convert_html_to_compact_html(html_path, compact_path)
+        reporter.emit("normalizing_document", "completed", "Compact HTML ready", detail=compact_path.name)
+
+    return _prepare_html_input(html_path=compact_path, skip_index=skip_index, reporter=reporter)
 
 
 def _prepare_pdf_input(
