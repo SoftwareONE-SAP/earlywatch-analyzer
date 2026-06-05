@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 FILENAME_YEAR_CUTOFF = 30
 FILENAME_YEAR_2000_OFFSET = 2000
 FILENAME_YEAR_1900_OFFSET = 1900
-SUPPORTED_UPLOAD_EXTENSIONS = (".zip", ".pdf")
+SUPPORTED_UPLOAD_EXTENSIONS = (".zip", ".pdf", ".doc", ".docx", ".xml")
 
 # ---------------------------------------------------------------------------
 # Filename validation and metadata extraction
@@ -163,7 +163,7 @@ async def upload_file(
     end_date: str = Form(...),
     _user: dict = Depends(require_auth()),
 ):
-    """Upload a ZIP/PDF file, convert to Markdown, and store in Azure Blob with provided metadata."""
+    """Upload an EWA report, normalize it, and store it in Azure Blob with metadata."""
 
     if not blob_service_client:
         raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized. Check server logs and .env configuration.")
@@ -176,13 +176,14 @@ async def upload_file(
     if not file_name_lower.endswith(SUPPORTED_UPLOAD_EXTENSIONS):
         raise HTTPException(
             status_code=400,
-            detail="Only .zip (HTML export) and .pdf files are supported.",
+            detail="Only .zip, .pdf, .doc, .docx, and Word 2003 .xml files are supported.",
         )
 
     try:
         import tempfile
         import zipfile
-        from converters.html_markdown_converter import convert_html_to_markdown
+        from converters.compact_html_converter import convert_html_to_compact_html
+        from converters.doc_html_converter import convert_doc_to_html
         from converters.pdf_markdown_converter import convert_pdf_to_markdown
         
         contents = await file.read()
@@ -221,15 +222,30 @@ async def upload_file(
                     raise HTTPException(status_code=400, detail="No .htm or .html file found in the uploaded zip.")
 
                 logger.info("Found HTML file in zip: %s", html_file_path)
-                markdown_content = await asyncio.to_thread(convert_html_to_markdown, html_file_path)
+                normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_file_path)
+                normalized_extension = ".html"
+                content_type = "text/html"
+            elif file_name_lower.endswith((".doc", ".docx", ".xml")):
+                logger.info("Converting uploaded Word document to compact HTML: %s", uploaded_path)
+                html_path = await asyncio.to_thread(
+                    convert_doc_to_html,
+                    uploaded_path,
+                    os.path.join(temp_dir, "doc_html"),
+                    prefer_word_com=False,
+                )
+                normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_path)
+                normalized_extension = ".html"
+                content_type = "text/html"
             else:
                 logger.info("Converting uploaded PDF to Markdown with pymupdf4llm: %s", uploaded_path)
-                markdown_content = await asyncio.to_thread(convert_pdf_to_markdown, uploaded_path)
+                normalized_content = await asyncio.to_thread(convert_pdf_to_markdown, uploaded_path)
+                normalized_extension = ".md"
+                content_type = "text/markdown"
             
-            if not markdown_content:
-                raise HTTPException(status_code=500, detail="Failed to convert uploaded file to Markdown.")
+            if not normalized_content:
+                raise HTTPException(status_code=500, detail="Failed to normalize uploaded file.")
                 
-            logger.info("Successfully converted HTML to Markdown (%d bytes)", len(markdown_content))
+            logger.info("Successfully normalized upload (%d bytes)", len(normalized_content))
         
             # Format dates (from YYYY-MM-DD input from frontend)
             try:
@@ -245,16 +261,15 @@ async def upload_file(
             }
                 
             # Generate new filename based on extracted metadata.
-            # We always store the converted file as markdown.
             new_filename = generate_standardized_filename(file_metadata, file.filename)
-            blob_name = re.sub(r"\.(zip|pdf)$", ".md", new_filename, flags=re.IGNORECASE)
+            blob_name = re.sub(r"\.(zip|pdf|docx?|xml)$", normalized_extension, new_filename, flags=re.IGNORECASE)
             
             blob_client = blob_service_client.get_blob_client(
                 container=AZURE_STORAGE_CONTAINER_NAME, blob=blob_name
             )
 
             logger.info(
-                "Uploading markdown to Azure Blob Storage in container %s as blob %s",
+                "Uploading normalized content to Azure Blob Storage in container %s as blob %s",
                 AZURE_STORAGE_CONTAINER_NAME,
                 blob_name,
             )
@@ -274,7 +289,7 @@ async def upload_file(
                 "start_date_str": start_date_obj.strftime("%d.%m.%Y")
             }
 
-            blob_client.upload_blob(markdown_content.encode('utf-8'), overwrite=True, metadata=metadata, content_type="text/markdown")
+            blob_client.upload_blob(normalized_content.encode("utf-8"), overwrite=True, metadata=metadata, content_type=content_type)
 
             logger.info(
                 "Successfully uploaded %s to %s with metadata: %s",
@@ -315,7 +330,7 @@ async def list_files(_user: dict = Depends(require_auth())):
         logger.info("Found %s total blobs in container", len(blob_list))
 
         json_files: Dict[str, bool] = {}
-        md_files: Dict[str, bool] = {}
+        normalized_files: Dict[str, bool] = {}
         ai_analyzed_files: Dict[str, bool] = {}
 
         for blob in blob_list:
@@ -329,7 +344,11 @@ async def list_files(_user: dict = Depends(require_auth())):
                 elif base_name.endswith("_workbook_payload"):
                     ai_analyzed_files[base_name[:-17]] = True  # strip _workbook_payload
             elif ext == ".md":
-                md_files[base_name] = True
+                normalized_files[base_name] = True
+                if base_name.endswith("_AI"):
+                    ai_analyzed_files[base_name[:-3]] = True
+            elif ext in {".htm", ".html"}:
+                normalized_files[base_name] = True
                 if base_name.endswith("_AI"):
                     ai_analyzed_files[base_name[:-3]] = True
             elif ext == ".xlsx" and base_name.endswith("_workbook"):
@@ -338,7 +357,11 @@ async def list_files(_user: dict = Depends(require_auth())):
         files: list[dict[str, Any]] = []
         file_groups: dict[str, list[dict[str, Any]]] = {}  # Group by customer+SID
         
-        pdf_zips = {os.path.splitext(b.name)[0] for b in blob_list if b.name.lower().endswith(('.pdf', '.zip'))}
+        original_uploads = {
+            os.path.splitext(b.name)[0]
+            for b in blob_list
+            if b.name.lower().endswith((".pdf", ".zip", ".doc", ".docx", ".xml"))
+        }
         
         for blob in blob_list:
             name_low = blob.name.lower()
@@ -354,9 +377,9 @@ async def list_files(_user: dict = Depends(require_auth())):
             ):
                 continue  # skip V2 workbook artifacts from main listing
                 
-            # If it's a regular .md file from the old workflow, it has a corresponding .pdf
+            # If it's a normalized file with a corresponding original upload, avoid duplicates.
             # Skip it so we don't show duplicates. For new zip uploads, only the .md exists.
-            if name_low.endswith(".md") and base_name in pdf_zips:
+            if name_low.endswith((".md", ".html", ".htm")) and base_name in original_uploads:
                 continue
 
             blob_client = container_client.get_blob_client(blob.name)
@@ -366,7 +389,7 @@ async def list_files(_user: dict = Depends(require_auth())):
             base_name, _ = os.path.splitext(blob.name)
             customer_name = metadata.get("customer_name", "Unknown")
             system_id = metadata.get("system_id", "Unknown")
-            processed = base_name in json_files or base_name in md_files
+            processed = base_name in json_files or base_name in normalized_files
             ai_analyzed = base_name in ai_analyzed_files
             
             # Check for processing flag in metadata
@@ -479,7 +502,7 @@ async def delete_analysis(
 
         # Allowlist of derivative suffixes that may be deleted for this document
         _DERIVATIVE_SUFFIXES = (
-            ".md", ".json", ".xlsx",
+            ".md", ".html", ".htm", ".json", ".xlsx",
             "_workbook.xlsx", "_workbook_payload.json",
             "_v2_usage.json",
         )
@@ -532,12 +555,12 @@ async def download_file(
         if not blob_service_client:
             raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized")
 
-        if blob_name.endswith(".md"):
+        if blob_name.endswith((".md", ".html", ".htm")):
             try:
                 content = await asyncio.to_thread(storage_service.get_text_content, blob_name)
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail=f"File {blob_name} not found") from None
-            content_type = "text/markdown"
+            content_type = "text/html" if blob_name.endswith((".html", ".htm")) else "text/markdown"
         elif blob_name.endswith(".json"):
             try:
                 content = await asyncio.to_thread(storage_service.get_text_content, blob_name)

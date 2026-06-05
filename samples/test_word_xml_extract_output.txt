@@ -1,0 +1,54 @@
+﻿Total text fragments found: 12780
+
+First 50 text fragments:
+
+SAP System ID
+Product
+Status
+DB System
+Customer
+Analysis from
+Until
+Processed by SAP
+Authorized for SAP employees delivering SAP Services and Support, authorized partners, and customer employees. Please forward to authorized recipients only.
+04.05.2026
+10.05.2026
+EarlyWatch
+«
+Alert
+Service Report
+Aalst
+Belgium
+PRD
+SAP ERP ENHANCE PACKAGE 6.08
+Productive
+SAP HANA Database
+VPK Group NV
+Session No.
+Installation No.
+Customer No.
+0010035030728
+0020101571
+507841
+Confidential
+ Service Summary
+The EarlyWatch Alert service has detected severe problems that may cause you to lose business.
+Please evaluate the recommendations.
+Alerts Decisive For Red Report
+SAP HANA database: Memory consumption of tables exceeds 70% of usable memory.
+Alert Overview
+Financial data quality: inconsistent data in FI-GL has been detected.
+SAP HANA Database: The maintenance end for your HANA Database Support Package Stack is reached.
+Missing index causes expensive SQL statement.
+Gateway Access Control List sec_info is not effective. Well-known attacks may endager your system.
+SAP HANA network settings for System Replication is insecure.
+SAP Software on this system is outdated. Support with SAP Security Notes is no longer ensured.
+SAP HANA database: Support Package has run out of security maintenance. Support with SAP Security Notes is no longer ensured.
+Users with critical authorizations, which allow to do anything in client 000
+Users with critical authorizations, which allow to do anything in other client(s) than 000
+Users with critical authorizations, which should not be used in production in other client(s) than 000
+Some SAP Notes solving side effects in SAP Finance are not implemented.
+Some SAP Notes solving side effects in SAP Logistics General are not implemented.
+Some SAP Notes solving side effects in SAP Logistics Execution are not implemented.
+Some SAP Notes solving side effects in SAP Cross-Application Components are not implemented.
+Fix the 716  inconsistent material(s) with the steps described in SAP Note 2197392

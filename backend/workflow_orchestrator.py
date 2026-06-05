@@ -124,25 +124,34 @@ class EWAWorkflowOrchestrator:
         """
         base_name = os.path.splitext(blob_name)[0]
         md_blob_name = f"{base_name}.md"
+        html_blob_name = blob_name if blob_name.lower().endswith((".htm", ".html")) else f"{base_name}.html"
 
         try:
-            # 1. Download markdown content from blob
-            logger.info("[WORKFLOW] Downloading markdown: %s", md_blob_name)
+            # 1. Download normalized source content from blob
+            source_suffix = ".html"
+            logger.info("[WORKFLOW] Downloading compact HTML: %s", html_blob_name)
             try:
-                md_content = await asyncio.to_thread(
-                    storage_service.get_text_content, md_blob_name
+                source_content = await asyncio.to_thread(
+                    storage_service.get_text_content, html_blob_name
                 )
             except FileNotFoundError:
-                return {
-                    "success": False,
-                    "message": f"Markdown file {md_blob_name} not found in storage.",
-                    "status_code": 404,
-                    "error_hint": "Please upload and process the document first.",
-                }
+                source_suffix = ".md"
+                logger.info("[WORKFLOW] Compact HTML not found; downloading markdown: %s", md_blob_name)
+                try:
+                    source_content = await asyncio.to_thread(
+                        storage_service.get_text_content, md_blob_name
+                    )
+                except FileNotFoundError:
+                    return {
+                        "success": False,
+                        "message": f"Neither {html_blob_name} nor {md_blob_name} was found in storage.",
+                        "status_code": 404,
+                        "error_hint": "Please upload and process the document first.",
+                    }
 
             # 2. Run the LangGraph pipeline in a background thread
             result = await asyncio.to_thread(
-                self._run_pipeline_sync, md_content, base_name
+                self._run_pipeline_sync, source_content, base_name, source_suffix
             )
 
             if not result["success"]:
@@ -179,7 +188,7 @@ class EWAWorkflowOrchestrator:
                 "error_hint": "An unexpected error occurred. Check server logs.",
             }
 
-    def _run_pipeline_sync(self, md_content: str, base_name: str) -> dict:
+    def _run_pipeline_sync(self, source_content: str, base_name: str, source_suffix: str) -> dict:
         """
         Run the v1 LangGraph pipeline synchronously in a temp directory.
 
@@ -192,9 +201,8 @@ class EWAWorkflowOrchestrator:
         with tempfile.TemporaryDirectory(prefix="ewa_pipeline_") as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            # Write markdown to temp file
-            md_path = tmpdir_path / f"{base_name}.md"
-            md_path.write_text(md_content, encoding="utf-8")
+            input_path = tmpdir_path / f"{base_name}{source_suffix}"
+            input_path.write_text(source_content, encoding="utf-8")
 
             # Output workbook path
             output_xlsx = tmpdir_path / f"{base_name}_workbook.xlsx"
@@ -206,7 +214,7 @@ class EWAWorkflowOrchestrator:
                 # Run the LangGraph pipeline
                 logger.info("[PIPELINE] Starting analysis for %s", base_name)
                 analysis_result, cost_tracker, artifacts = run_pipeline(
-                    input_path=md_path,
+                    input_path=input_path,
                     output_path=output_xlsx,
                     config=config,
                     progress_callback=progress_cb,

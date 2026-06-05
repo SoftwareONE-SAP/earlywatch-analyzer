@@ -1,0 +1,57 @@
+Topic Rating,Topic,Subtopic Rating,Subtopic
+,Service Data Quality and Service Readiness,,
+,,,Sending EarlyWatch Alert of PRD to SAP Backbone
+,,,Configuring PRD for SAP Note Assistant
+,,,Service Preparation of PRD
+,Software Configuration for PRD,,
+,,,SAP Application Release - Maintenance Phases
+,,,Security Risk Due to Outdated Support Packages
+,,,Database - Maintenance Phases
+,,,Operating System(s) - Maintenance Phases
+,,,SAP Kernel Release
+,,,HANA Database Version for PR1
+,Hardware Capacity,,
+,Workload Distribution PRD,,
+,,,Workload by Application Module
+,,,DB Load Profile
+,Performance Overview PRD,,
+,SAP System Operating PRD,,
+,,,Availability based on Collector Protocols
+,,,Program Errors (ABAP Dumps)
+,,,Update Errors
+,,,Table Reorganization
+,,,Critical Number Ranges
+,Security,,
+,,,Maintenance Status of current SAP HANA Database Revision
+,,,SAP HANA System Privilege DATA ADMIN
+,,,SAP HANA Password Policy  *
+,,,SAP HANA Audit Trail
+,,,SAP HANA SQL Trace Level *
+,,,SAP HANA Network Settings for Internal Services  *
+,,,SAP HANA Network Settings for System Replication Communication (listeninterface)
+,,,Activation Status and Validity of User SYSTEM  *
+,,,Age of Support Packages
+,,,Default Passwords of Standard Users *
+,,,Control of the Automatic Login User SAP* *
+,,,Protection of Passwords in Database Connections *
+,,,ABAP Password Policy
+,,,RFC Gateway Security
+,,,Message Server Security  *
+,,,"Critical authorizations, which allow to do anything"
+,,,"Critical authorizations, which should not be used in production"
+,,,"Critical authorizations, which should only see very limited use in production *"
+,Software Change and Transport Management of PRD,,
+,,,Emergency Changes
+,,,Failed Changes
+,SAP HANA Database PR1,,
+,,,SAP HANA Stability and Alerts
+,,,SAP HANA Database Configuration
+,,,SAP HANA Resource Consumption
+,,,SAP HANA Workload and Performance
+,,,Size and Growth
+,,,Administration
+,,,Important SAP Notes for SAP HANA
+,SAP NetWeaver Gateway,,
+,,,MetaData Cache Activation
+,,,Logging Configuration
+,,,Gateway Error Logs *

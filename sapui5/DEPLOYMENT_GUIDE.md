@@ -1,6 +1,8 @@
 # SAPUI5 Frontend – Azure Web App Deployment Guide
 
-This guide explains how to package the SAPUI5 frontend as a Docker image, push it to Azure Container Registry (ACR) via GitHub Actions (matching the existing backend/frontend automation), and prepare it for hosting on an Azure Web App for Containers.
+> **Superseded:** Production deployments use a single combined image and `.github/workflows/deploy-to-containerapp.yml`. See [docs/AZURE_MIGRATION_GUIDE.md](../docs/AZURE_MIGRATION_GUIDE.md) and [deployment/instructions.md](../deployment/instructions.md). The steps below describe the legacy split Web App / separate-image path and are kept for reference only.
+
+This guide explains how to package the SAPUI5 frontend as a Docker image, push it to Azure Container Registry (ACR), and prepare it for hosting on an Azure Web App for Containers.
 
 > **Scope**: Documentation only—follow these steps to add automation/configuration later. Commands assume the repo root is `ewa_analyzer/`.
 
@@ -8,10 +10,8 @@ This guide explains how to package the SAPUI5 frontend as a Docker image, push i
 
 ## 1. Prerequisites
 
-1. **Azure Container Registry** – reuse `sapservicesuk-g8b0edb8fthrbpgj.azurecr.io` (see `.github/workflows/push-to-acr.yml`).
-2. **GitHub Secrets** – already configured for the current workflow:
-   - `REGISTRY_USERNAME`
-   - `REGISTRY_PASSWORD`
+1. **Azure Container Registry** – your target registry (for example `myregistry.azurecr.io`).
+2. **GitHub Secrets** – for the active Container App workflow, see `ACR_LOGIN_SERVER` and `AZURE_*` secrets in the migration guide (legacy split-image flows used `REGISTRY_USERNAME` / `REGISTRY_PASSWORD`).
 3. **Node.js LTS** + **UI5 CLI** (for local builds/tests).
 4. **Docker CLI** with access to the registry if you plan to run local smoke tests.
 
@@ -63,21 +63,9 @@ Visit `http://localhost:8080/index.html` and verify the UI5 app loads.
 
 ---
 
-## 5. Extend GitHub Actions Workflow
+## 5. GitHub Actions (current path)
 
-1. Edit `.github/workflows/push-to-acr.yml` and append a third `docker/build-push-action` step after the existing backend/frontend builds:
-   ```yaml
-      - name: Build and push SAPUI5 frontend with cache
-        uses: docker/build-push-action@v5
-        with:
-          context: ./sapui5
-          push: true
-          tags: ${{ env.REGISTRY }}/ewa-sapui5:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/ewa-sapui5:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/ewa-sapui5:buildcache,mode=max
-   ```
-2. The existing `REGISTRY`, `REGISTRY_USERNAME`, and `REGISTRY_PASSWORD` env values automatically cover this new step.
-3. GitHub Actions will now push `ewa-sapui5:latest` to ACR on the same triggers (`main`, `heidegger`, `fiori-migration`).
+Use `.github/workflows/deploy-to-containerapp.yml` at the repo root. It builds `Dockerfile.containerapp`, which includes the SAPUI5 `dist` output and the FastAPI backend in one image. Push to `main` or run the workflow manually from the Actions tab.
 
 ---
 

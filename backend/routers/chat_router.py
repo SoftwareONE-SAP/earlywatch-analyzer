@@ -12,6 +12,7 @@ import logging
 import json
 import re
 import tempfile
+from pathlib import Path
 from typing import List, Dict, Any
 import asyncio
 
@@ -55,7 +56,7 @@ async def chat_with_document(
     request: ChatRequest,
     _user: dict = Depends(require_auth()),
 ):
-    """Chat with a processed EWA Markdown document using Azure OpenAI GPT models."""
+    """Chat with a processed EWA document using Azure OpenAI GPT models."""
     # DEBUG: Log incoming request summary
     logger.info("----- /api/chat CALL -----")
     try:
@@ -94,21 +95,27 @@ async def chat_with_document(
             else request.chatHistory
         )
 
-        # Fetch markdown from storage first; fallback to incoming payload.
-        md_content = (request.documentContent or "").strip()
+        # Fetch normalized source from storage first; fallback to incoming payload.
+        document_content = (request.documentContent or "").strip()
         tree: dict[str, Any] | None = None
         selected_doc_context = ""
         try:
             if request.fileName:
                 storage = StorageService()
                 base, _ = os.path.splitext(request.fileName)
+                html_filename = f"{base}.html"
                 md_filename = f"{base}.md"
-                fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(md_filename))
+                source_filename = html_filename
+                try:
+                    fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(html_filename))
+                except FileNotFoundError:
+                    source_filename = md_filename
+                    fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(md_filename))
                 if fetched_content:
-                    md_content = fetched_content.strip()
+                    document_content = fetched_content.strip()
 
-                if md_content:
-                    tree = await _load_or_build_tree(storage, md_filename, md_content)
+                if document_content:
+                    tree = await _load_or_build_tree(storage, source_filename, document_content)
                     selected_doc_context = _build_relevant_context(
                         tree=tree,
                         question=request.message,
@@ -132,8 +139,8 @@ async def chat_with_document(
             logger.warning("Storage fetch failed (using fallback): %s", e)
 
         # Fallback: if tree retrieval yields nothing, keep only a bounded excerpt.
-        if not selected_doc_context and md_content:
-            selected_doc_context = md_content[:CHAT_NODE_CONTEXT_CHARS]
+        if not selected_doc_context and document_content:
+            selected_doc_context = document_content[:CHAT_NODE_CONTEXT_CHARS]
 
         if not selected_doc_context:
             raise HTTPException(status_code=400, detail="Document content is missing. Please process the document first.")
@@ -367,15 +374,28 @@ def _build_tree_from_markdown(md_filename: str, markdown_content: str) -> Dict[s
         )
 
 
-async def _load_or_build_tree(storage: StorageService, md_filename: str, markdown_content: str) -> Dict[str, Any]:
-    base, _ = os.path.splitext(md_filename)
+def _build_tree_from_html(html_filename: str, html_content: str) -> Dict[str, Any]:
+    from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        html_path = os.path.join(temp_dir, html_filename)
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        return build_document_tree_from_html(Path(html_path), Path(temp_dir))
+
+
+async def _load_or_build_tree(storage: StorageService, source_filename: str, source_content: str) -> Dict[str, Any]:
+    base, ext = os.path.splitext(source_filename)
     tree_blob = f"{base}_tree.json"
 
     try:
         tree_text = await asyncio.to_thread(lambda: storage.get_text_content(tree_blob))
         return json.loads(tree_text)
     except Exception:
-        tree = await asyncio.to_thread(_build_tree_from_markdown, md_filename, markdown_content)
+        if ext.lower() in {".htm", ".html"}:
+            tree = await asyncio.to_thread(_build_tree_from_html, source_filename, source_content)
+        else:
+            tree = await asyncio.to_thread(_build_tree_from_markdown, source_filename, source_content)
         try:
             await asyncio.to_thread(
                 lambda: storage.upload_text_content(
@@ -385,5 +405,5 @@ async def _load_or_build_tree(storage: StorageService, md_filename: str, markdow
                 )
             )
         except Exception as cache_err:
-            logger.info("Tree cache upload skipped for %s: %s", md_filename, cache_err)
+            logger.info("Tree cache upload skipped for %s: %s", source_filename, cache_err)
         return tree
