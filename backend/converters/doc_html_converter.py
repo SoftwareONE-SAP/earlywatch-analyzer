@@ -37,6 +37,11 @@ class DocConversionError(RuntimeError):
     """Raised when document conversion to HTML fails."""
 
 
+_NON_FATAL_LIBREOFFICE_WARNINGS = (
+    "warning: failed to launch javaldx - java may not function correctly",
+)
+
+
 def find_soffice() -> str:
     """Return the first available LibreOffice binary path."""
     for candidate in DEFAULT_SOFFICE_PATHS:
@@ -72,6 +77,11 @@ def _discover_html_output(output_dir: Path, source_stem: str) -> Path:
             f"No .htm/.html output found in {output_dir} after conversion."
         )
     return html_candidates[0]
+
+
+def _is_non_fatal_libreoffice_warning(detail: str) -> bool:
+    normalized = detail.strip().lower()
+    return any(warning in normalized for warning in _NON_FATAL_LIBREOFFICE_WARNINGS)
 
 
 def discover_companion_dirs(html_path: Path) -> list[Path]:
@@ -142,13 +152,31 @@ def _convert_with_libreoffice(
             f"LibreOffice timed out after {timeout_seconds}s while converting {doc_path.name}"
         ) from exc
 
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    detail = stderr or stdout or f"exit code {result.returncode}"
+    html_path: Path | None = None
+    try:
+        html_path = _discover_html_output(output_dir, doc_path.stem)
+    except DocConversionError:
+        html_path = None
+
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
-        detail = stderr or stdout or f"exit code {result.returncode}"
+        if html_path is not None and _is_non_fatal_libreoffice_warning(detail):
+            logger.warning(
+                "LibreOffice returned %s for %s but produced HTML output anyway: %s",
+                result.returncode,
+                doc_path.name,
+                detail,
+            )
+            logger.info("LibreOffice HTML output: %s", html_path)
+            return html_path
         raise DocConversionError(f"LibreOffice conversion failed: {detail}")
 
-    html_path = _discover_html_output(output_dir, doc_path.stem)
+    if html_path is None:
+        raise DocConversionError(
+            f"LibreOffice conversion completed but no .htm/.html output was found for {doc_path.name}."
+        )
     logger.info("LibreOffice HTML output: %s", html_path)
     return html_path
 
