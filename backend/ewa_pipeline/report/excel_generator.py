@@ -395,36 +395,38 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
     _apply_app_style(ws, zoom=110)
     ws.sheet_properties.tabColor = _TAB_UTIL
 
-    _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Output Tokens", "Total Tokens"])
+    _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Cached Input", "Billable Input", "Output Tokens", "Total Tokens"])
     ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
 
     data_rows = [
-        ("Phase 0 — PageIndex",       "gpt-5.4-nano (LiteLLM)", usage.phase0_input_tokens,  usage.phase0_output_tokens),
-        ("Phase 1 — Domain Analysis", "gpt-5.4-mini",           usage.phase1_input_tokens,  usage.phase1_output_tokens),
-        ("Phase 2 — Cross-Ref+Synth", "gpt-5.4",                usage.phase2_input_tokens,  usage.phase2_output_tokens),
+        ("Phase 0 — PageIndex",       "gpt-5.4-nano (LiteLLM)", usage.phase0_input_tokens, usage.phase0_cached_input_tokens, usage.phase0_output_tokens),
+        ("Phase 1 — Domain Analysis", "gpt-5.4-mini",           usage.phase1_input_tokens, usage.phase1_cached_input_tokens, usage.phase1_output_tokens),
+        ("Phase 2 — Cross-Ref+Synth", "gpt-5.4",                usage.phase2_input_tokens, usage.phase2_cached_input_tokens, usage.phase2_output_tokens),
     ]
 
-    for i, (phase, model, inp, out) in enumerate(data_rows):
+    for i, (phase, model, inp, cached_inp, out) in enumerate(data_rows):
         r = 2 + i
         ws.cell(r, 1, phase).font = _font()
         ws.cell(r, 2, model).font = _font()
         ws.cell(r, 3, inp).number_format = _NUM
-        ws.cell(r, 4, out).number_format = _NUM
-        c = ws.cell(r, 5, f"=C{r}+D{r}")
+        ws.cell(r, 4, cached_inp).number_format = _NUM
+        ws.cell(r, 5, max(inp - cached_inp, 0)).number_format = _NUM
+        ws.cell(r, 6, out).number_format = _NUM
+        c = ws.cell(r, 7, f"=C{r}+F{r}")
         c.number_format = _NUM
         c.font = _font()
         if i % 2 == 1:
-            for col in range(1, 6):
+            for col in range(1, 8):
                 ws.cell(r, col).fill = _fill(_C_ALT)
 
     tr = 2 + len(data_rows)
     ws.cell(tr, 1, "TOTAL").font = _font(bold=True)
-    for col, letter in ((3, "C"), (4, "D"), (5, "E")):
+    for col, letter in ((3, "C"), (4, "D"), (5, "E"), (6, "F"), (7, "G")):
         c = ws.cell(tr, col, f"=SUM({letter}2:{letter}{tr-1})")
         c.number_format = _NUM
         c.font = _font(bold=True)
-    for col in range(1, 6):
+    for col in range(1, 8):
         ws.cell(tr, col).fill = _fill("BDD7EE")
 
     ws.cell(tr + 2, 1,

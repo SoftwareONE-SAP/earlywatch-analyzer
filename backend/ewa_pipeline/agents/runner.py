@@ -192,9 +192,13 @@ def run_analysis(
     p2b = cost_tracker._entries.get("phase2_synthesis")
     token_usage = TokenUsage(
         phase1_input_tokens=(p1.input_tokens if p1 else 0),
+        phase1_cached_input_tokens=(p1.cached_input_tokens if p1 else 0),
         phase1_output_tokens=(p1.output_tokens if p1 else 0),
         phase2_input_tokens=(
             (p2a.input_tokens if p2a else 0) + (p2b.input_tokens if p2b else 0)
+        ),
+        phase2_cached_input_tokens=(
+            (p2a.cached_input_tokens if p2a else 0) + (p2b.cached_input_tokens if p2b else 0)
         ),
         phase2_output_tokens=(
             (p2a.output_tokens if p2a else 0) + (p2b.output_tokens if p2b else 0)

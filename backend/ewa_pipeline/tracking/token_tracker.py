@@ -5,15 +5,26 @@ from pydantic import BaseModel
 
 class TokenUsage(BaseModel):
     phase0_input_tokens: int = 0
+    phase0_cached_input_tokens: int = 0
     phase0_output_tokens: int = 0
     phase1_input_tokens: int = 0
+    phase1_cached_input_tokens: int = 0
     phase1_output_tokens: int = 0
     phase2_input_tokens: int = 0
+    phase2_cached_input_tokens: int = 0
     phase2_output_tokens: int = 0
 
     @property
     def total_input_tokens(self) -> int:
         return self.phase0_input_tokens + self.phase1_input_tokens + self.phase2_input_tokens
+
+    @property
+    def total_cached_input_tokens(self) -> int:
+        return self.phase0_cached_input_tokens + self.phase1_cached_input_tokens + self.phase2_cached_input_tokens
+
+    @property
+    def total_billable_input_tokens(self) -> int:
+        return max(self.total_input_tokens - self.total_cached_input_tokens, 0)
 
     @property
     def total_output_tokens(self) -> int:

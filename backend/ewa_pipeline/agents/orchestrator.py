@@ -64,9 +64,34 @@ class EwaAnalysisState(TypedDict):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _tokens(raw: Any) -> tuple[int, int]:
+def _usage_details(meta: Any, key: str) -> int:
+    if isinstance(meta, dict):
+        details = meta.get(key) or {}
+        if isinstance(details, dict):
+            return int(details.get("cache_read", 0) or 0)
+        return 0
+
+    details = getattr(meta, key, None)
+    if details is None:
+        return 0
+    if isinstance(details, dict):
+        return int(details.get("cache_read", 0) or 0)
+    return int(getattr(details, "cache_read", 0) or 0)
+
+
+def _usage_value(meta: Any, key: str) -> int:
+    if isinstance(meta, dict):
+        return int(meta.get(key, 0) or 0)
+    return int(getattr(meta, key, 0) or 0)
+
+
+def _tokens(raw: Any) -> tuple[int, int, int]:
     meta = getattr(raw, "usage_metadata", None) or {}
-    return meta.get("input_tokens", 0), meta.get("output_tokens", 0)
+    return (
+        _usage_value(meta, "input_tokens"),
+        _usage_value(meta, "output_tokens"),
+        _usage_details(meta, "input_token_details"),
+    )
 
 
 def _derive_health(analyses: list[DomainAnalysis]) -> str:
@@ -126,8 +151,14 @@ def build_ewa_graph(
         result = planner_chain.invoke(
             [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
         )
-        inp, out = _tokens(result.get("raw"))
-        cost_tracker.record("phase0_planning", orchestrator_deployment, inp, out)
+        inp, out, cached_inp = _tokens(result.get("raw"))
+        cost_tracker.record(
+            "phase0_planning",
+            orchestrator_deployment,
+            inp,
+            out,
+            cached_input_tokens=cached_inp,
+        )
 
         plan: OrchestratorPlan = result["parsed"]
         return {
@@ -197,8 +228,14 @@ def build_ewa_graph(
         )
         try:
             result = domain_chain.invoke([HumanMessage(content=prompt)])
-            inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase1_domain_analysis", specialist_deployment, inp, out)
+            inp, out, cached_inp = _tokens(result.get("raw"))
+            cost_tracker.record(
+                "phase1_domain_analysis",
+                specialist_deployment,
+                inp,
+                out,
+                cached_input_tokens=cached_inp,
+            )
             da: DomainAnalysis = result["parsed"]
             return {"domain_analyses": [da]}
         except Exception as exc:
@@ -221,8 +258,14 @@ def build_ewa_graph(
         )
         try:
             result = xref_chain.invoke([HumanMessage(content=prompt)])
-            inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase2_cross_reference", orchestrator_deployment, inp, out)
+            inp, out, cached_inp = _tokens(result.get("raw"))
+            cost_tracker.record(
+                "phase2_cross_reference",
+                orchestrator_deployment,
+                inp,
+                out,
+                cached_input_tokens=cached_inp,
+            )
             xref_list: CrossReferenceList = result["parsed"]
             return {"cross_references": xref_list.items}
         except Exception:
@@ -260,8 +303,14 @@ Write the final synthesis:
             result = synth_chain.invoke(
                 [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
-            inp, out = _tokens(result.get("raw"))
-            cost_tracker.record("phase2_synthesis", orchestrator_deployment, inp, out)
+            inp, out, cached_inp = _tokens(result.get("raw"))
+            cost_tracker.record(
+                "phase2_synthesis",
+                orchestrator_deployment,
+                inp,
+                out,
+                cached_input_tokens=cached_inp,
+            )
             synthesis: SynthesisResult = result["parsed"]
             return {
                 "executive_summary": synthesis.executive_summary,
