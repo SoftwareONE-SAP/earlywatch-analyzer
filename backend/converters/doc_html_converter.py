@@ -1,7 +1,10 @@
-"""Convert Word .doc/.docx files to HTML (Word COM or LibreOffice)."""
+"""Convert Word .doc/.docx files to HTML (WordML, Word COM, or LibreOffice)."""
 
 from __future__ import annotations
 
+import base64
+import binascii
+import html
 import logging
 import os
 import shutil
@@ -9,7 +12,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
+from converters.html_markdown_converter import classify_icon
 from converters.word_com_html_converter import (
     WordComNotAvailableError,
     convert_doc_to_html_word_com,
@@ -40,6 +45,144 @@ class DocConversionError(RuntimeError):
 _NON_FATAL_LIBREOFFICE_WARNINGS = (
     "warning: failed to launch javaldx - java may not function correctly",
 )
+
+WORDML_NS = "http://schemas.microsoft.com/office/word/2003/wordml"
+WORDML = f"{{{WORDML_NS}}}"
+WORDML_NAME = f"{WORDML}name"
+WORDML_VAL = f"{WORDML}val"
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _image_extension(data: bytes) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    return None
+
+
+def _wordml_image_labels(root: ET.Element, output_dir: Path, source_stem: str) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    assets_dir = output_dir / f"{source_stem}_files"
+    for index, bin_data in enumerate(root.findall(f".//{WORDML}binData")):
+        name = bin_data.attrib.get(WORDML_NAME)
+        payload = "".join((bin_data.text or "").split())
+        if not name or not payload:
+            continue
+        try:
+            data = base64.b64decode(payload)
+        except binascii.Error:
+            continue
+        extension = _image_extension(data)
+        if extension is None:
+            labels[name] = "[IMAGE]"
+            continue
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        image_path = assets_dir / f"wordml_image_{index}{extension}"
+        image_path.write_bytes(data)
+        labels[name] = classify_icon(str(image_path))
+    return labels
+
+
+def _wordml_text(element: ET.Element, image_labels: dict[str, str]) -> str:
+    parts: list[str] = []
+    for child in element.iter():
+        name = _local_name(child.tag)
+        if name == "t" and child.text:
+            parts.append(child.text)
+        elif name == "tab":
+            parts.append(" ")
+        elif name == "br":
+            parts.append("\n")
+        elif name == "imagedata":
+            label = image_labels.get(child.attrib.get("src", ""))
+            if label:
+                parts.append(label)
+    return " ".join(" ".join(parts).split())
+
+
+def _wordml_paragraph_style(paragraph: ET.Element) -> str:
+    style = paragraph.find(f"./{WORDML}pPr/{WORDML}pStyle")
+    return style.attrib.get(WORDML_VAL, "") if style is not None else ""
+
+
+def _wordml_heading_tag(style: str) -> str | None:
+    normalized = style.lower().replace("_", " ")
+    if "heading" not in normalized:
+        return None
+    for level in range(1, 7):
+        if str(level) in normalized:
+            return f"h{level}"
+    return None
+
+
+def _wordml_paragraph_html(paragraph: ET.Element, image_labels: dict[str, str]) -> str:
+    text = _wordml_text(paragraph, image_labels)
+    if not text:
+        return ""
+    tag = _wordml_heading_tag(_wordml_paragraph_style(paragraph)) or "p"
+    return f"<{tag}>{html.escape(text)}</{tag}>"
+
+
+def _wordml_table_html(table: ET.Element, image_labels: dict[str, str]) -> str:
+    rows: list[str] = []
+    for row_index, row in enumerate(table.findall(f"./{WORDML}tr")):
+        cells: list[str] = []
+        cell_tag = "th" if row_index == 0 else "td"
+        for cell in row.findall(f"./{WORDML}tc"):
+            text = _wordml_text(cell, image_labels)
+            grid_span = cell.find(f"./{WORDML}tcPr/{WORDML}gridSpan")
+            colspan = ""
+            if grid_span is not None:
+                value = grid_span.attrib.get(WORDML_VAL)
+                if value and value.isdigit() and int(value) > 1:
+                    colspan = f' colspan="{value}"'
+            cells.append(f"<{cell_tag}{colspan}>{html.escape(text)}</{cell_tag}>")
+        if cells:
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+    return "<table>" + "".join(rows) + "</table>" if rows else ""
+
+
+def _wordml_blocks(element: ET.Element, image_labels: dict[str, str]) -> list[str]:
+    blocks: list[str] = []
+    for child in element:
+        name = _local_name(child.tag)
+        if name == "p":
+            block = _wordml_paragraph_html(child, image_labels)
+            if block:
+                blocks.append(block)
+        elif name == "tbl":
+            block = _wordml_table_html(child, image_labels)
+            if block:
+                blocks.append(block)
+        else:
+            blocks.extend(_wordml_blocks(child, image_labels))
+    return blocks
+
+
+def _convert_word2003_xml_to_html(doc_path: Path, output_dir: Path) -> Path:
+    tree = ET.parse(doc_path)
+    root = tree.getroot()
+    image_labels = _wordml_image_labels(root, output_dir, doc_path.stem)
+    body = root.find(f".//{WORDML}body")
+    if body is None:
+        raise DocConversionError(f"Word 2003 XML body was not found in {doc_path.name}.")
+
+    blocks = _wordml_blocks(body, image_labels)
+
+    if not blocks:
+        raise DocConversionError(f"Word 2003 XML conversion produced no text for {doc_path.name}.")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    html_path = output_dir / f"{doc_path.stem}.html"
+    html_path.write_text("<article>\n" + "\n".join(blocks) + "\n</article>\n", encoding="utf-8")
+    logger.info("Word 2003 XML HTML output: %s", html_path)
+    return html_path
 
 
 def find_soffice() -> str:
@@ -126,7 +269,7 @@ def _convert_with_libreoffice(
         f"-env:UserInstallation={user_installation}",
     ]
     if infilter:
-        cmd.extend(["--infilter", infilter])
+        cmd.append(f"--infilter={infilter}")
     cmd.extend(
         [
             "--convert-to",
@@ -221,15 +364,19 @@ def convert_doc_to_html(
             logger.warning("Word COM failed, falling back to LibreOffice: %s", exc)
 
     if kind == "word2003_xml":
-        staged = output_dir / doc_path.name
-        shutil.copy2(doc_path, staged)
-        return _convert_with_libreoffice(
-            staged,
-            output_dir,
-            soffice_path=soffice_path,
-            timeout_seconds=timeout_seconds,
-            infilter="MS Word 2003 XML",
-        )
+        try:
+            return _convert_word2003_xml_to_html(doc_path, output_dir)
+        except (ET.ParseError, DocConversionError) as exc:
+            logger.warning("Word 2003 XML direct conversion failed, falling back to LibreOffice: %s", exc)
+            staged = output_dir / doc_path.name
+            shutil.copy2(doc_path, staged)
+            return _convert_with_libreoffice(
+                staged,
+                output_dir,
+                soffice_path=soffice_path,
+                timeout_seconds=timeout_seconds,
+                infilter="MS Word 2003 XML",
+            )
 
     return _convert_with_libreoffice(
         doc_path,
