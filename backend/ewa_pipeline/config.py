@@ -27,6 +27,7 @@ class PageIndexConfig(BaseModel):
 
 class ModelPrice(BaseModel):
     input_per_1m: float = 0.0   # USD per million input tokens
+    cached_input_per_1m: float | None = None  # USD per million cached input tokens
     output_per_1m: float = 0.0  # USD per million output tokens
 
 
@@ -37,8 +38,16 @@ class Config(BaseModel):
 
     def pricing_dict(self) -> dict[str, dict[str, float]]:
         """Return pricing in the flat format CostTracker expects."""
-        return {k: {"input_per_1m": v.input_per_1m, "output_per_1m": v.output_per_1m}
-                for k, v in self.pricing.items()}
+        pricing: dict[str, dict[str, float]] = {}
+        for key, value in self.pricing.items():
+            entry = {
+                "input_per_1m": value.input_per_1m,
+                "output_per_1m": value.output_per_1m,
+            }
+            if value.cached_input_per_1m is not None:
+                entry["cached_input_per_1m"] = value.cached_input_per_1m
+            pricing[key] = entry
+        return pricing
 
 
 def _first_env(*names: str) -> str:

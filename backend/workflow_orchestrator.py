@@ -15,9 +15,12 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.azure_clients import (
@@ -125,6 +128,7 @@ class EWAWorkflowOrchestrator:
         base_name = os.path.splitext(blob_name)[0]
         md_blob_name = f"{base_name}.md"
         html_blob_name = blob_name if blob_name.lower().endswith((".htm", ".html")) else f"{base_name}.html"
+        started_at = time.time()
 
         try:
             # 1. Download normalized source content from blob
@@ -160,6 +164,12 @@ class EWAWorkflowOrchestrator:
                 )
                 return result
 
+            self._attach_run_usage_summary(
+                result,
+                source_blob_name=blob_name,
+                started_at=started_at,
+            )
+
             # 3. Upload artifacts back to blob storage
             logger.info("[WORKFLOW] Uploading artifacts for %s", base_name)
             artifact_names = await self._upload_artifacts(base_name, result)
@@ -187,6 +197,36 @@ class EWAWorkflowOrchestrator:
                 "status_code": 500,
                 "error_hint": "An unexpected error occurred. Check server logs.",
             }
+
+    def _attach_run_usage_summary(
+        self,
+        result: dict,
+        *,
+        source_blob_name: str,
+        started_at: float,
+    ) -> None:
+        """Enrich the usage artifact with run-level timing and source metadata."""
+        cost_json = result.get("cost_json")
+        if not cost_json:
+            return
+
+        completed_at = time.time()
+        duration_ms = int(round((completed_at - started_at) * 1000))
+
+        try:
+            usage = json.loads(cost_json)
+        except json.JSONDecodeError:
+            logger.warning("[WORKFLOW] Could not parse usage JSON for %s", source_blob_name)
+            return
+
+        usage["run"] = {
+            "source_blob_name": source_blob_name,
+            "started_at": datetime.fromtimestamp(started_at, timezone.utc).isoformat(),
+            "completed_at": datetime.fromtimestamp(completed_at, timezone.utc).isoformat(),
+            "duration_ms": duration_ms,
+            "duration_seconds": round(duration_ms / 1000, 1),
+        }
+        result["cost_json"] = json.dumps(usage, indent=2)
 
     def _run_pipeline_sync(self, source_content: str, base_name: str, source_suffix: str) -> dict:
         """

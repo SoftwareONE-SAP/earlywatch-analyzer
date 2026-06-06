@@ -1477,3 +1477,23 @@ body,
 .sapMBarRight .sapMBtnEmphasized .sapMBtnContent {
     color: #ffffff !important;
 }
+
+.ewaUsageCard {
+    background: var(--ewa-bg-card) !important;
+    border: 1px solid var(--ewa-border) !important;
+    border-radius: var(--ewa-radius-md) !important;
+    padding: 1rem !important;
+    box-shadow: var(--ewa-shadow-sm);
+}
+
+.ewaUsageNotesTitle {
+    color: var(--ewa-text-primary) !important;
+    font-weight: 600 !important;
+    margin-bottom: 0.35rem !important;
+}
+
+.ewaUsageNoteItem {
+    color: var(--ewa-text-secondary) !important;
+    line-height: 1.5 !important;
+    margin-top: 0.25rem !important;
+}
