@@ -69,7 +69,7 @@ def _libreoffice_user_installation_uri(work_dir: Path) -> str:
 def _discover_html_output(output_dir: Path, source_stem: str) -> Path:
     """Find the HTML file produced for a given source document."""
     html_candidates = sorted(
-        output_dir.glob("*.htm") + output_dir.glob("*.html"),
+        list(output_dir.glob("*.htm")) + list(output_dir.glob("*.html")),
         key=lambda p: (p.name.lower() != f"{source_stem.lower()}.html", p.name),
     )
     if not html_candidates:
