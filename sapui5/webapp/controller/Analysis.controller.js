@@ -58,12 +58,12 @@ sap.ui.define([
 
             this.getView().setBusy(true);
 
-            Promise.all([
-                this._fetchRequiredJson(this._sPayloadName),
-                this._fetchOptionalJson(this._sUsageName)
-            ])
-                .then(function (aResults) {
-                    that._renderWorkbookSummary(aResults[0], aResults[1]);
+            this._fetchRequiredJson(this._sPayloadName)
+                .then(function (oPayload) {
+                    return that._loadUsageArtifact()
+                        .then(function (oUsage) {
+                            that._renderWorkbookSummary(oPayload, oUsage || that._usageFromPayload(oPayload));
+                        });
                 })
                 .catch(function (err) {
                     MessageBox.error("Failed to load analysis results: " + err.message);
@@ -86,14 +86,35 @@ sap.ui.define([
         _fetchOptionalJson: function (sBlobName) {
             return fetch(Config.getDownloadUrl(sBlobName))
                 .then(function (response) {
-                    if (response.status === 404) {
+                    if (!response.ok) {
                         return null;
                     }
-                    if (!response.ok) {
-                        throw new Error("Usage artifact could not be loaded (HTTP " + response.status + ")");
-                    }
                     return response.json();
+                })
+                .catch(function () {
+                    return null;
                 });
+        },
+
+        _loadUsageArtifact: function () {
+            var aCandidates = [
+                this._sUsageName,
+                this._sBaseName + "_usage.json",
+                this._sBaseName + "_workbook_cost.json"
+            ];
+
+            var fnTryNext = function (iIndex) {
+                if (iIndex >= aCandidates.length) {
+                    return Promise.resolve(null);
+                }
+
+                return this._fetchOptionalJson(aCandidates[iIndex])
+                    .then(function (oUsage) {
+                        return oUsage || fnTryNext(iIndex + 1);
+                    });
+            }.bind(this);
+
+            return fnTryNext(0);
         },
 
         _renderWorkbookSummary: function (payload, usage) {
@@ -307,6 +328,79 @@ sap.ui.define([
 
                 oContainer.addItem(oNotesBox);
             }
+        },
+
+        _usageFromPayload: function (oPayload) {
+            var oTokenUsage = oPayload && oPayload.token_usage;
+            if (!oTokenUsage) {
+                return null;
+            }
+
+            var aBreakdown = [
+                this._usageEntryFromPayload(
+                    "phase0_planning",
+                    "gpt-5.4",
+                    oTokenUsage.phase0_input_tokens,
+                    oTokenUsage.phase0_cached_input_tokens,
+                    oTokenUsage.phase0_output_tokens
+                ),
+                this._usageEntryFromPayload(
+                    "phase1_domain_analysis",
+                    "gpt-5.4-mini",
+                    oTokenUsage.phase1_input_tokens,
+                    oTokenUsage.phase1_cached_input_tokens,
+                    oTokenUsage.phase1_output_tokens
+                ),
+                this._usageEntryFromPayload(
+                    "phase2_synthesis",
+                    "gpt-5.4",
+                    oTokenUsage.phase2_input_tokens,
+                    oTokenUsage.phase2_cached_input_tokens,
+                    oTokenUsage.phase2_output_tokens
+                )
+            ];
+
+            var oTotals = aBreakdown.reduce(function (oAcc, oEntry) {
+                oAcc.input_tokens += oEntry.input_tokens;
+                oAcc.cached_input_tokens += oEntry.cached_input_tokens;
+                oAcc.billable_input_tokens += oEntry.billable_input_tokens;
+                oAcc.output_tokens += oEntry.output_tokens;
+                oAcc.total_tokens += oEntry.input_tokens + oEntry.output_tokens;
+                return oAcc;
+            }, {
+                calls: 0,
+                input_tokens: 0,
+                cached_input_tokens: 0,
+                billable_input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                cost_usd: 0
+            });
+
+            return {
+                breakdown: aBreakdown,
+                totals: oTotals,
+                notes: [
+                    "Detailed usage JSON was not available; showing token totals embedded in the workbook payload."
+                ]
+            };
+        },
+
+        _usageEntryFromPayload: function (sPhase, sModel, iInput, iCachedInput, iOutput) {
+            var nInput = Number(iInput || 0);
+            var nCachedInput = Number(iCachedInput || 0);
+            var nOutput = Number(iOutput || 0);
+
+            return {
+                phase: sPhase,
+                model: sModel,
+                calls: 0,
+                input_tokens: nInput,
+                cached_input_tokens: nCachedInput,
+                billable_input_tokens: Math.max(nInput - nCachedInput, 0),
+                output_tokens: nOutput,
+                total_cost_usd: 0
+            };
         },
 
         _makeStat: function (sValue, sLabel, sState) {
