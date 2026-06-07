@@ -9,6 +9,26 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+OPENAI_FALLBACK_PRICING: dict[str, dict[str, float]] = {
+    # Official OpenAI standard API pricing per 1M text tokens, checked 2026-06-07.
+    # Azure deployments may be named after these models; config.yaml can override.
+    "gpt-5.4": {
+        "input_per_1m": 2.50,
+        "cached_input_per_1m": 0.25,
+        "output_per_1m": 15.00,
+    },
+    "gpt-5.4-mini": {
+        "input_per_1m": 0.75,
+        "cached_input_per_1m": 0.075,
+        "output_per_1m": 4.50,
+    },
+    "gpt-5.4-nano": {
+        "input_per_1m": 0.20,
+        "cached_input_per_1m": 0.02,
+        "output_per_1m": 1.25,
+    },
+}
+
 
 @dataclass
 class _Entry:
@@ -33,7 +53,7 @@ class CostTracker:
             }
         }
         """
-        self.pricing = pricing
+        self.pricing = {**OPENAI_FALLBACK_PRICING, **pricing}
         self._entries: dict[str, _Entry] = {}
         self._lock = threading.Lock()
 
@@ -74,7 +94,7 @@ class CostTracker:
     def to_dict(self, pdf_name: str = "") -> dict:
         breakdown = []
         notes = [
-            "Prices come from config.yaml pricing entries for each Azure deployment.",
+            "Prices come from config.yaml when present; otherwise known OpenAI model rates are used as a fallback.",
             "Document indexing and PageIndex token usage are not included here because those steps run separately via LiteLLM.",
         ]
         total_calls = total_input = total_cached_input = total_output = 0

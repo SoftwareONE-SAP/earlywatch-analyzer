@@ -31,6 +31,23 @@ sap.ui.define([
         minimumFractionDigits: 4,
         maximumFractionDigits: 6
     });
+    var OPENAI_FALLBACK_PRICING = {
+        "gpt-5.4": {
+            input_per_1m: 2.50,
+            cached_input_per_1m: 0.25,
+            output_per_1m: 15.00
+        },
+        "gpt-5.4-mini": {
+            input_per_1m: 0.75,
+            cached_input_per_1m: 0.075,
+            output_per_1m: 4.50
+        },
+        "gpt-5.4-nano": {
+            input_per_1m: 0.20,
+            cached_input_per_1m: 0.02,
+            output_per_1m: 1.25
+        }
+    };
 
     return Controller.extend("ewa.analyzer.controller.Analysis", {
 
@@ -249,6 +266,8 @@ sap.ui.define([
         },
 
         _renderUsageSummary: function (oContainer, oUsage) {
+            oUsage = this._withComputedCosts(oUsage);
+
             if (!oUsage || !oUsage.totals) {
                 oContainer.addItem(new VBox({
                     items: [
@@ -330,6 +349,105 @@ sap.ui.define([
             }
         },
 
+        _withComputedCosts: function (oUsage) {
+            if (!oUsage || !oUsage.totals) {
+                return oUsage;
+            }
+
+            var bUsedFallbackPricing = false;
+            var nTotalCost = 0;
+            var aBreakdown = (oUsage.breakdown || []).map(function (oEntry) {
+                var oPricedEntry = Object.assign({}, oEntry);
+                var oPricing = this._pricingForEntry(oPricedEntry);
+                var nInputTokens = Number(oPricedEntry.input_tokens || 0);
+                var nCachedInputTokens = Number(oPricedEntry.cached_input_tokens || 0);
+                var nOutputTokens = Number(oPricedEntry.output_tokens || 0);
+                var nBillableInputTokens = Math.max(
+                    Number(oPricedEntry.billable_input_tokens || 0) || (nInputTokens - nCachedInputTokens),
+                    0
+                );
+
+                oPricedEntry.billable_input_tokens = nBillableInputTokens;
+
+                if (oPricing) {
+                    bUsedFallbackPricing = bUsedFallbackPricing || this._entryHasZeroPricing(oEntry);
+                    oPricedEntry.pricing = oPricing;
+                    oPricedEntry.input_cost_usd = this._roundCost(nBillableInputTokens / 1000000 * oPricing.input_per_1m);
+                    oPricedEntry.cached_input_cost_usd = this._roundCost(nCachedInputTokens / 1000000 * oPricing.cached_input_per_1m);
+                    oPricedEntry.output_cost_usd = this._roundCost(nOutputTokens / 1000000 * oPricing.output_per_1m);
+                    oPricedEntry.total_cost_usd = this._roundCost(
+                        oPricedEntry.input_cost_usd +
+                        oPricedEntry.cached_input_cost_usd +
+                        oPricedEntry.output_cost_usd
+                    );
+                }
+
+                nTotalCost += Number(oPricedEntry.total_cost_usd || 0);
+                return oPricedEntry;
+            }.bind(this));
+
+            var oTotals = Object.assign({}, oUsage.totals, {
+                cost_usd: this._roundCost(nTotalCost)
+            });
+            var aNotes = (oUsage.notes || []).filter(function (sNote) {
+                return sNote.indexOf("No pricing configured for model") === -1;
+            });
+
+            if (bUsedFallbackPricing) {
+                aNotes.push("Costs were calculated in the UI from OpenAI standard API pricing for known model names.");
+            }
+
+            return Object.assign({}, oUsage, {
+                breakdown: aBreakdown,
+                totals: oTotals,
+                notes: aNotes
+            });
+        },
+
+        _pricingForEntry: function (oEntry) {
+            var sModel = this._normalizeModelName(oEntry.model);
+            var oCurrentPricing = oEntry.pricing || {};
+            var oFallbackPricing = OPENAI_FALLBACK_PRICING[sModel];
+
+            if (!this._entryHasZeroPricing(oEntry)) {
+                return {
+                    input_per_1m: Number(oCurrentPricing.input_per_1m || 0),
+                    cached_input_per_1m: Number(oCurrentPricing.cached_input_per_1m || 0),
+                    output_per_1m: Number(oCurrentPricing.output_per_1m || 0)
+                };
+            }
+
+            return oFallbackPricing || null;
+        },
+
+        _entryHasZeroPricing: function (oEntry) {
+            var oPricing = oEntry.pricing || {};
+
+            return !Number(oPricing.input_per_1m || 0) &&
+                !Number(oPricing.cached_input_per_1m || 0) &&
+                !Number(oPricing.output_per_1m || 0);
+        },
+
+        _normalizeModelName: function (sModel) {
+            var sValue = String(sModel || "").toLowerCase();
+
+            if (sValue.indexOf("gpt-5.4-mini") !== -1) {
+                return "gpt-5.4-mini";
+            }
+            if (sValue.indexOf("gpt-5.4-nano") !== -1) {
+                return "gpt-5.4-nano";
+            }
+            if (sValue.indexOf("gpt-5.4") !== -1) {
+                return "gpt-5.4";
+            }
+
+            return sValue;
+        },
+
+        _roundCost: function (nValue) {
+            return Math.round(Number(nValue || 0) * 1000000) / 1000000;
+        },
+
         _usageFromPayload: function (oPayload) {
             var oTokenUsage = oPayload && oPayload.token_usage;
             if (!oTokenUsage) {
@@ -399,6 +517,7 @@ sap.ui.define([
                 cached_input_tokens: nCachedInput,
                 billable_input_tokens: Math.max(nInput - nCachedInput, 0),
                 output_tokens: nOutput,
+                pricing: OPENAI_FALLBACK_PRICING[sModel],
                 total_cost_usd: 0
             };
         },
