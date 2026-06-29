@@ -36,7 +36,7 @@ async def export_json_to_excel(
             workbook_blob_name = blob_name
         elif blob_name.lower().endswith("_workbook_payload.json"):
             workbook_blob_name = f"{incoming_base[:-17]}_workbook.xlsx"
-        elif incoming_ext.lower() in {".md", ".pdf", ".json"}:
+        elif incoming_ext.lower() in {".html", ".htm", ".json"}:
             workbook_blob_name = f"{incoming_base}_workbook.xlsx"
         else:
             workbook_blob_name = f"{blob_name}_workbook.xlsx"

@@ -17,14 +17,6 @@ class AzureConfig(BaseModel):
     deployments: DeploymentsConfig
 
 
-class PageIndexConfig(BaseModel):
-    model: str
-    max_pages_per_node: int = 10
-    max_tokens_per_node: int = 20000
-    add_node_summary: bool = True
-    add_doc_description: bool = False
-
-
 class ModelPrice(BaseModel):
     input_per_1m: float = 0.0   # USD per million input tokens
     cached_input_per_1m: float | None = None  # USD per million cached input tokens
@@ -33,7 +25,6 @@ class ModelPrice(BaseModel):
 
 class Config(BaseModel):
     azure_openai: AzureConfig
-    pageindex: PageIndexConfig
     pricing: dict[str, ModelPrice] = {}
 
     def pricing_dict(self) -> dict[str, dict[str, float]]:
@@ -56,23 +47,6 @@ def _first_env(*names: str) -> str:
         if value:
             return value
     return ""
-
-
-def _get_bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _get_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
 
 
 def _build_env_config() -> Config:
@@ -103,8 +77,6 @@ def _build_env_config() -> Config:
             f"Missing: {missing_list}."
         )
 
-    pageindex_model = _first_env("PAGEINDEX_MODEL") or f"azure/{router_deployment}"
-
     return Config.model_validate(
         {
             "azure_openai": {
@@ -116,13 +88,6 @@ def _build_env_config() -> Config:
                     "specialist": specialist_deployment,
                     "router": router_deployment,
                 },
-            },
-            "pageindex": {
-                "model": pageindex_model,
-                "max_pages_per_node": _get_int_env("PAGEINDEX_MAX_PAGES_PER_NODE", 10),
-                "max_tokens_per_node": _get_int_env("PAGEINDEX_MAX_TOKENS_PER_NODE", 20000),
-                "add_node_summary": _get_bool_env("PAGEINDEX_ADD_NODE_SUMMARY", True),
-                "add_doc_description": _get_bool_env("PAGEINDEX_ADD_DOC_DESCRIPTION", False),
             },
             "pricing": {},
         }

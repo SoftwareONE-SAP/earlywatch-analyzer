@@ -8,8 +8,6 @@ from rich.console import Console
 
 # Suppress Pydantic serialization noise that fires on every LLM call when
 # use_responses_api=True + with_structured_output(include_raw=True).
-# The ParsedResponseOutputMessage union type generates a UserWarning for every
-# possible union branch; the parsed output is correct regardless.
 warnings.filterwarnings(
     "ignore",
     message="Pydantic serializer warnings",
@@ -23,19 +21,20 @@ console = Console()
 def _load_env_and_config(config_path: str = "config.yaml"):
     load_dotenv()
     from ewa_pipeline.config import load_config
+
     return load_config(Path(config_path))
 
 
 @click.group()
 def cli():
-    """EWA Deep Analyzer — SAP EarlyWatch Alert analysis pipeline."""
+    """EWA Deep Analyzer - SAP EarlyWatch Alert analysis pipeline."""
 
 
 def _print_completion(result, cost_tracker, output_path: Path, doc_name: str) -> None:
     health_color = {"Critical": "red", "Warning": "yellow", "Healthy": "green"}.get(
         result.overall_system_health, "white"
     )
-    total_cost = cost_tracker.to_dict(pdf_name=doc_name)["totals"]["cost_usd"]
+    total_cost = cost_tracker.to_dict(document_name=doc_name)["totals"]["cost_usd"]
     console.print(
         f"\n[bold green]Done![/bold green] "
         f"Overall health: [{health_color}]{result.overall_system_health}[/{health_color}] | "
@@ -46,34 +45,15 @@ def _print_completion(result, cost_tracker, output_path: Path, doc_name: str) ->
     )
 
 
-# ---------------------------------------------------------------------------
-# analyze
-# ---------------------------------------------------------------------------
-
 @cli.command()
-@click.option("--pdf", default=None, type=click.Path(exists=True), help="Path to EWA PDF")
-@click.option("--zip", "zip_path", default=None, type=click.Path(exists=True),
-              help="Path to EWA ZIP (HTML + icon assets)")
-@click.option("--doc", "doc_path", default=None, type=click.Path(exists=True),
-              help="Path to EWA Word/Word 2003 XML document")
+@click.option("--doc", "doc_path", required=True, type=click.Path(exists=True), help="Path to EWA .doc document")
 @click.option("--output", default="output/analysis.xlsx", show_default=True, help="Output Excel path")
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
 @click.option("--verbose", is_flag=True, help="Show detailed progress")
 @click.option("--skip-index", is_flag=True, help="Reuse existing _tree.json if present")
-@click.option("--skip-analysis", is_flag=True, help="Reuse existing _result.json (skip Phase 1+2 LLM calls)")
-def analyze(pdf: str, zip_path: str, doc_path: str, output: str, config_path: str, verbose: bool,
-            skip_index: bool, skip_analysis: bool):
-    """Run the full EWA analysis pipeline (Phase 0 + Phase 1 + Phase 2 + Excel).
-
-    Accepts a PDF (--pdf), ZIP containing an EWA HTML export (--zip), or Word document (--doc).
-    Exactly one input must be supplied.
-    """
-    provided = sum(x is not None for x in (pdf, zip_path, doc_path))
-    if provided == 0:
-        raise click.UsageError("Provide --pdf, --zip, or --doc.")
-    if provided > 1:
-        raise click.UsageError("Only one of --pdf, --zip, or --doc can be specified.")
-
+@click.option("--skip-analysis", is_flag=True, help="Reuse existing _result.json")
+def analyze(doc_path: str, output: str, config_path: str, verbose: bool, skip_index: bool, skip_analysis: bool):
+    """Run the full EWA analysis pipeline for a .doc document."""
     config = _load_env_and_config(config_path)
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,9 +70,7 @@ def analyze(pdf: str, zip_path: str, doc_path: str, output: str, config_path: st
     result, cost_tracker, artifacts = run_pipeline(
         config=config,
         output_path=output_path,
-        pdf_path=Path(pdf) if pdf else None,
-        zip_path=Path(zip_path) if zip_path else None,
-        input_path=Path(doc_path) if doc_path else None,
+        input_path=Path(doc_path),
         skip_index=skip_index,
         skip_analysis=skip_analysis,
         verbose=verbose,
@@ -104,19 +82,13 @@ def analyze(pdf: str, zip_path: str, doc_path: str, output: str, config_path: st
     _print_completion(result, cost_tracker, output_path, artifacts.doc_name)
 
 
-# ---------------------------------------------------------------------------
-# excel  (unchanged)
-# ---------------------------------------------------------------------------
-
 @cli.command()
-@click.option("--result", required=True, type=click.Path(exists=True),
-              help="Path to _result.json from a previous run")
-@click.option("--tree", "tree_path", required=True, type=click.Path(exists=True),
-              help="Path to _tree.json from Phase 0")
+@click.option("--result", required=True, type=click.Path(exists=True), help="Path to _result.json from a previous run")
+@click.option("--tree", "tree_path", required=True, type=click.Path(exists=True), help="Path to _tree.json from Phase 0")
 @click.option("--output", default="output/analysis.xlsx", show_default=True, help="Output Excel path")
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
 def excel(result: str, tree_path: str, output: str, config_path: str):
-    """Phase 3 only: regenerate Excel from a saved _result.json (no LLM calls for analysis)."""
+    """Regenerate Excel from saved analysis artifacts."""
     config = _load_env_and_config(config_path)
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,13 +108,13 @@ def excel(result: str, tree_path: str, output: str, config_path: str):
     console.print("[cyan]Phase 3[/cyan]: generating Excel workbook...")
     excel_generator.generate(analysis_result, output_path, tree=tree)
 
-    cost_tracker.save(cost_path, pdf_name=Path(result).stem)
+    cost_tracker.save(cost_path, document_name=Path(result).stem)
     console.print(f"  Cost report saved to [bold]{cost_path}[/bold]")
 
     health_color = {"Critical": "red", "Warning": "yellow", "Healthy": "green"}.get(
         analysis_result.overall_system_health, "white"
     )
-    total_cost = cost_tracker.to_dict(pdf_name=Path(result).stem)["totals"]["cost_usd"]
+    total_cost = cost_tracker.to_dict(document_name=Path(result).stem)["totals"]["cost_usd"]
     console.print(
         f"\n[bold green]Done![/bold green] "
         f"Overall health: [{health_color}]{analysis_result.overall_system_health}[/{health_color}] | "
@@ -162,82 +134,28 @@ def web(host: str, port: int):
     uvicorn.run("ewa_analyzer.web:app", host=host, port=port, reload=False)
 
 
-# ---------------------------------------------------------------------------
-# index  (Phase 0 debug; supports both --pdf and --zip)
-# ---------------------------------------------------------------------------
-
 @cli.command()
-@click.option("--pdf", default=None, type=click.Path(exists=True), help="Path to EWA PDF")
-@click.option("--zip", "zip_path", default=None, type=click.Path(exists=True),
-              help="Path to EWA ZIP (HTML + icon assets)")
-@click.option("--doc", "doc_path", default=None, type=click.Path(exists=True),
-              help="Path to EWA Word/Word 2003 XML document")
+@click.option("--doc", "doc_path", required=True, type=click.Path(exists=True), help="Path to EWA .doc document")
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
-def index(pdf: str, zip_path: str, doc_path: str, config_path: str):
-    """Phase 0 only: parse document and build PageIndex tree (for debugging).
+def index(doc_path: str, config_path: str):
+    """Parse a .doc document and build the document tree for debugging."""
+    _load_env_and_config(config_path)
 
-    Accepts --pdf, --zip, or --doc (exactly one required).
-    """
-    provided = sum(x is not None for x in (pdf, zip_path, doc_path))
-    if provided == 0:
-        raise click.UsageError("Provide --pdf, --zip, or --doc.")
-    if provided > 1:
-        raise click.UsageError("Only one of --pdf, --zip, or --doc can be specified.")
-
-    config = _load_env_and_config(config_path)
-
+    from converters.compact_html_converter import convert_html_to_compact_html
+    from converters.doc_html_converter import convert_doc_to_html
+    from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
     from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections, tree_to_summary
 
-    if zip_path:
-        from ewa_pipeline.indexer.zip_extractor import extract_ewa_zip
-        from ewa_pipeline.indexer.html_parser import parse_html_to_markdown
-        from ewa_pipeline.indexer.tree_builder import build_document_tree_from_md
+    doc_file = Path(doc_path)
+    data_dir = doc_file.parent
+    compact_path = data_dir / f"{doc_file.stem}.html"
 
-        zip_file = Path(zip_path)
-        data_dir = zip_file.parent
-        extract_dir = data_dir / f"{zip_file.stem}_html"
+    console.print(f"[cyan]Converting[/cyan]: {doc_file.name} -> compact HTML...")
+    html_path = convert_doc_to_html(doc_file, data_dir / f"{doc_file.stem}_html", prefer_word_com=False)
+    convert_html_to_compact_html(html_path, compact_path)
 
-        console.print(f"[cyan]Extracting[/cyan]: {zip_file.name}")
-        html_path, _ = extract_ewa_zip(zip_file, extract_dir)
-        console.print(f"  HTML file: {html_path.name}")
-
-        console.print(f"[cyan]Converting[/cyan]: HTML → markdown...")
-        _, saved_md = parse_html_to_markdown(html_path, data_dir)
-        md_path = saved_md
-        console.print(f"  Markdown: {saved_md}")
-
-        console.print("[cyan]Indexing[/cyan]: building PageIndex tree from markdown (gpt-5.4-nano)...")
-        tree = build_document_tree_from_md(md_path, config, data_dir)
-
-    elif pdf:
-        from ewa_pipeline.indexer.pdf_parser import parse_pdf_to_pages, parse_pdf_to_markdown
-        from ewa_pipeline.indexer.tree_builder import build_document_tree
-
-        pdf_path = Path(pdf)
-        data_dir = pdf_path.parent
-
-        console.print(f"[cyan]Parsing[/cyan]: {pdf_path.name}")
-        pages = parse_pdf_to_pages(pdf_path)
-        _, md_path = parse_pdf_to_markdown(pdf_path, data_dir)
-        console.print(f"  {len(pages)} pages -> {md_path}")
-
-        console.print("[cyan]Indexing[/cyan]: building PageIndex tree (gpt-5.4-nano)...")
-        tree = build_document_tree(pdf_path, config, data_dir)
-    else:
-        from converters.compact_html_converter import convert_html_to_compact_html
-        from converters.doc_html_converter import convert_doc_to_html
-        from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
-
-        doc_file = Path(doc_path)
-        data_dir = doc_file.parent
-        compact_path = data_dir / f"{doc_file.stem}.html"
-
-        console.print(f"[cyan]Converting[/cyan]: {doc_file.name} -> compact HTML...")
-        html_path = convert_doc_to_html(doc_file, data_dir / f"{doc_file.stem}_html", prefer_word_com=False)
-        convert_html_to_compact_html(html_path, compact_path)
-
-        console.print("[cyan]Indexing[/cyan]: building HTML document structure...")
-        tree = build_document_tree_from_html(compact_path, data_dir)
+    console.print("[cyan]Indexing[/cyan]: building HTML document structure...")
+    tree = build_document_tree_from_html(compact_path, data_dir)
 
     sections = get_analyzable_sections(tree)
     console.print(f"  Analyzable sections: {len(sections)}")

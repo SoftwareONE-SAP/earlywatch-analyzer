@@ -104,18 +104,12 @@ async def chat_with_document(
                 storage = StorageService()
                 base, _ = os.path.splitext(request.fileName)
                 html_filename = f"{base}.html"
-                md_filename = f"{base}.md"
-                source_filename = html_filename
-                try:
-                    fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(html_filename))
-                except FileNotFoundError:
-                    source_filename = md_filename
-                    fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(md_filename))
+                fetched_content = await asyncio.to_thread(lambda: storage.get_text_content(html_filename))
                 if fetched_content:
                     document_content = fetched_content.strip()
 
                 if document_content:
-                    tree = await _load_or_build_tree(storage, source_filename, document_content)
+                    tree = await _load_or_build_tree(storage, html_filename, document_content)
                     selected_doc_context = _build_relevant_context(
                         tree=tree,
                         question=request.message,
@@ -354,26 +348,6 @@ def _build_relevant_context(tree: Dict[str, Any], question: str, chat_history: L
     return "\n\n".join(selected_blocks)
 
 
-def _build_tree_from_markdown(md_filename: str, markdown_content: str) -> Dict[str, Any]:
-    from pageindex import md_to_tree
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        md_path = os.path.join(temp_dir, md_filename)
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(markdown_content)
-
-        return asyncio.run(
-            md_to_tree(
-                md_path=md_path,
-                if_thinning=False,
-                if_add_node_summary="no",
-                if_add_doc_description="no",
-                if_add_node_text="yes",
-                if_add_node_id="yes",
-            )
-        )
-
-
 def _build_tree_from_html(html_filename: str, html_content: str) -> Dict[str, Any]:
     from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
 
@@ -385,17 +359,14 @@ def _build_tree_from_html(html_filename: str, html_content: str) -> Dict[str, An
 
 
 async def _load_or_build_tree(storage: StorageService, source_filename: str, source_content: str) -> Dict[str, Any]:
-    base, ext = os.path.splitext(source_filename)
+    base, _ = os.path.splitext(source_filename)
     tree_blob = f"{base}_tree.json"
 
     try:
         tree_text = await asyncio.to_thread(lambda: storage.get_text_content(tree_blob))
         return json.loads(tree_text)
     except Exception:
-        if ext.lower() in {".htm", ".html"}:
-            tree = await asyncio.to_thread(_build_tree_from_html, source_filename, source_content)
-        else:
-            tree = await asyncio.to_thread(_build_tree_from_markdown, source_filename, source_content)
+        tree = await asyncio.to_thread(_build_tree_from_html, source_filename, source_content)
         try:
             await asyncio.to_thread(
                 lambda: storage.upload_text_content(

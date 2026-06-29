@@ -42,7 +42,7 @@ class EwaAnalysisState(TypedDict):
     # Inputs — set once before the graph runs
     tree_summary: str
     sections_available: list[dict]       # [{id, title, summary}] — for planner
-    sections_content: dict[str, str]     # section_id → markdown content
+    sections_content: dict[str, str]     # section_id to source content
     skills_catalog: str
 
     # After planner node

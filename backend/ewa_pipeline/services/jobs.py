@@ -135,9 +135,7 @@ class JobManager:
             _, _, artifacts = run_pipeline(
                 config=config,
                 output_path=output_path,
-                pdf_path=input_path if record.input_type == "pdf" else None,
-                zip_path=input_path if record.input_type == "zip" else None,
-                input_path=input_path if record.input_type in {"doc", "docx", "xml", "html", "htm"} else None,
+                input_path=input_path if record.input_type == "doc" else None,
                 skills_dir=Path("skills"),
                 progress_callback=_on_progress,
             )

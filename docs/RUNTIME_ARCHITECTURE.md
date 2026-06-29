@@ -22,7 +22,7 @@ This is the minimum runtime context for the current Azure-only target.
 The backend does not use a database. All persistent state is stored in Azure Blob Storage:
 
 - uploaded source files
-- extracted markdown
+- normalized compact HTML
 - AI analysis JSON
 - workbook payload JSON
 - generated Excel output

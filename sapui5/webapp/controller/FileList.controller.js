@@ -258,7 +258,7 @@ sap.ui.define([
 
         handleTypeMissmatch: function (oEvent) {
             var sFileName = oEvent.getParameter("fileName");
-            MessageToast.show("Only ZIP, PDF, DOC, DOCX, or Word 2003 XML files are supported" + (sFileName ? ": " + sFileName : ""));
+            MessageToast.show("Only DOC files are supported" + (sFileName ? ": " + sFileName : ""));
         },
 
         onUploadPress: function () {
@@ -509,7 +509,7 @@ sap.ui.define([
 
         onViewAnalysisPress: function (oEvent) {
             var oItem = oEvent.getSource().getBindingContext("files").getObject();
-            var sBaseName = oItem.name.replace(/\.(pdf|zip|md|html?|docx?|xml)$/i, "");
+            var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
 
             this.getOwnerComponent().getRouter().navTo("Preview", {
                 baseName: sBaseName
@@ -518,7 +518,7 @@ sap.ui.define([
 
         onDeletePress: function (oEvent) {
             var oItem = oEvent.getSource().getBindingContext("files").getObject();
-            var sBaseName = oItem.name.replace(/\.(pdf|zip|md|html?|docx?|xml)$/i, "");
+            var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
 
             MessageBox.confirm("Are you sure you want to delete " + oItem.name + "?", {
                 onClose: (oAction) => {
@@ -570,7 +570,7 @@ sap.ui.define([
                         aSelectedContexts.forEach(context => {
                             var oFile = context.getObject();
                             // Reuse delete logic (simplified for batch here)
-                            var sBaseName = oFile.name.replace(/\.(pdf|zip|md|html?|docx?|xml)$/i, "");
+                            var sBaseName = oFile.name.replace(/\.(doc|html?)$/i, "");
                             fetch(Config.getEndpoint("deleteAnalysis"), {
                                 method: "DELETE",
                                 headers: { "Content-Type": "application/json" },
@@ -591,7 +591,7 @@ sap.ui.define([
 
         onDownloadExcelPress: function (oEvent) {
             var oItem = oEvent.getSource().getBindingContext("files").getObject();
-            var sBaseName = oItem.name.replace(/\.(pdf|zip|md|html?|docx?|xml)$/i, "");
+            var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
             var sWorkbookName = sBaseName + "_workbook.xlsx";
             window.open(Config.getDownloadUrl(sWorkbookName), "_blank");
         },

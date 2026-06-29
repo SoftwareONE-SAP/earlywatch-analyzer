@@ -44,7 +44,7 @@ sap.ui.define([], function () {
             process: "/api/process-and-analyze",
             reprocess: "/api/reprocess-ai",
             deleteAnalysis: "/api/delete-analysis",
-            getAnalysis: "/api/download/", // + blobName (for .md or .json)
+            getAnalysis: "/api/download/", // + blobName
             exportExcel: "/api/export-excel", // Excel export
             chat: "/api/chat"
         },

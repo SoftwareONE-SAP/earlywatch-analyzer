@@ -30,8 +30,6 @@ def run_pipeline(
     *,
     config: Config,
     output_path: Path,
-    pdf_path: Path | None = None,
-    zip_path: Path | None = None,
     input_path: Path | None = None,
     skip_index: bool = False,
     skip_analysis: bool = False,
@@ -39,11 +37,8 @@ def run_pipeline(
     skills_dir: Path | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[AnalysisResult, CostTracker, PipelineArtifacts]:
-    provided = sum(x is not None for x in (pdf_path, zip_path, input_path))
-    if provided == 0:
-        raise ValueError("Provide one of pdf_path, zip_path, or input_path.")
-    if provided > 1:
-        raise ValueError("Only one of pdf_path, zip_path, or input_path can be specified.")
+    if input_path is None:
+        raise ValueError("Provide input_path.")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,42 +48,22 @@ def run_pipeline(
     result_path = output_path.parent / f"{output_path.stem}_result.json"
     cost_path = output_path.parent / f"{output_path.stem}_cost.json"
 
-    if input_path:
-        input_path = Path(input_path)
-        input_suffix = input_path.suffix.lower()
-        if input_suffix in {".htm", ".html"}:
-            tree, pages, doc_name, tree_path, sections = _prepare_html_input(
-                html_path=input_path,
-                skip_index=skip_index,
-                reporter=reporter,
-            )
-        elif input_suffix in {".doc", ".docx", ".xml"}:
-            tree, pages, doc_name, tree_path, sections = _prepare_doc_input(
-                doc_path=input_path,
-                skip_index=skip_index,
-                reporter=reporter,
-            )
-        else:
-            tree, pages, doc_name, tree_path, sections = _prepare_md_input(
-                md_path=input_path,
-                config=config,
-                skip_index=skip_index,
-                reporter=reporter,
-            )
-    elif zip_path:
-        tree, pages, doc_name, tree_path, sections = _prepare_zip_input(
-            zip_path=Path(zip_path),
-            config=config,
+    input_path = Path(input_path)
+    input_suffix = input_path.suffix.lower()
+    if input_suffix in {".htm", ".html"}:
+        tree, pages, doc_name, tree_path, sections = _prepare_html_input(
+            html_path=input_path,
+            skip_index=skip_index,
+            reporter=reporter,
+        )
+    elif input_suffix == ".doc":
+        tree, pages, doc_name, tree_path, sections = _prepare_doc_input(
+            doc_path=input_path,
             skip_index=skip_index,
             reporter=reporter,
         )
     else:
-        tree, pages, doc_name, tree_path, sections = _prepare_pdf_input(
-            pdf_path=Path(pdf_path),
-            config=config,
-            skip_index=skip_index,
-            reporter=reporter,
-        )
+        raise ValueError(f"Unsupported input type: {input_suffix}")
 
     if skip_analysis and result_path.exists():
         reporter.emit(
@@ -135,7 +110,7 @@ def run_pipeline(
         percent=100,
     )
 
-    cost_tracker.save(cost_path, pdf_name=doc_name)
+    cost_tracker.save(cost_path, document_name=doc_name)
     reporter.emit(
         "completed",
         "completed",
@@ -159,61 +134,6 @@ def _default_skills_dir() -> Path:
     # backend/ewa_pipeline/services/pipeline.py → backend/skills
     backend_dir = Path(__file__).resolve().parent.parent.parent
     return backend_dir / "skills"
-
-
-def _prepare_md_input(
-    *,
-    md_path: Path,
-    config: Config,
-    skip_index: bool,
-    reporter: ProgressReporter,
-) -> tuple[dict, dict[int, str], str, Path, list]:
-    """Prepare pipeline input from a pre-existing markdown file."""
-    from ewa_pipeline.indexer.tree_builder import build_document_tree_from_md
-
-    data_dir = md_path.parent
-    tree_path = data_dir / f"{md_path.stem}_tree.json"
-
-    reporter.emit(
-        "normalizing_document",
-        "completed",
-        "Markdown loaded",
-        detail=md_path.name,
-    )
-
-    if skip_index and tree_path.exists():
-        reporter.emit(
-            "building_tree",
-            "completed",
-            "Reusing document structure",
-            detail=tree_path.name,
-        )
-        tree = json.loads(tree_path.read_text(encoding="utf-8"))
-    else:
-        reporter.emit(
-            "building_tree",
-            "running",
-            "Building document structure",
-            detail=md_path.name,
-        )
-        tree = build_document_tree_from_md(md_path, config, data_dir)
-        reporter.emit(
-            "building_tree",
-            "completed",
-            "Document structure ready",
-            detail=tree_path.name,
-        )
-
-    sections = get_analyzable_sections(tree)
-    reporter.emit(
-        "discovering_sections",
-        "completed",
-        "Sections discovered",
-        detail=f"{len(sections)} sections ready",
-        current=len(sections),
-        total=len(sections) or 1,
-    )
-    return tree, {}, md_path.stem, tree_path, sections
 
 
 def _prepare_html_input(
@@ -279,73 +199,3 @@ def _prepare_doc_input(
     return _prepare_html_input(html_path=compact_path, skip_index=skip_index, reporter=reporter)
 
 
-def _prepare_zip_input(
-    *,
-    zip_path: Path,
-    config: Config,
-    skip_index: bool,
-    reporter: ProgressReporter,
-) -> tuple[dict, dict[int, str], str, Path, list]:
-    from converters.compact_html_converter import convert_html_to_compact_html
-    from ewa_pipeline.indexer.zip_extractor import extract_ewa_zip
-
-    data_dir = zip_path.parent
-    extract_dir = data_dir / f"{zip_path.stem}_html"
-    reporter.emit("extracting_input", "running", "Extracting ZIP archive", detail=zip_path.name)
-    html_path, _ = extract_ewa_zip(zip_path, extract_dir)
-    reporter.emit("extracting_input", "completed", "ZIP extracted", detail=html_path.name)
-
-    compact_path = data_dir / f"{html_path.stem}.html"
-    tree_path = data_dir / f"{compact_path.stem}_tree.json"
-    if skip_index and compact_path.exists():
-        reporter.emit("normalizing_document", "completed", "Reusing compact HTML", detail=compact_path.name)
-    else:
-        reporter.emit("normalizing_document", "running", "Compacting HTML for LLM input", detail=html_path.name)
-        convert_html_to_compact_html(html_path, compact_path)
-        reporter.emit("normalizing_document", "completed", "Compact HTML ready", detail=compact_path.name)
-
-    return _prepare_html_input(html_path=compact_path, skip_index=skip_index, reporter=reporter)
-
-
-def _prepare_pdf_input(
-    *,
-    pdf_path: Path,
-    config: Config,
-    skip_index: bool,
-    reporter: ProgressReporter,
-) -> tuple[dict, dict[int, str], str, Path, list]:
-    from ewa_pipeline.indexer.pdf_parser import parse_pdf_to_pages
-    from ewa_pipeline.indexer.tree_builder import build_document_tree
-
-    data_dir = pdf_path.parent
-    tree_path = data_dir / f"{pdf_path.stem}_tree.json"
-
-    reporter.emit("normalizing_document", "running", "Parsing PDF into pages", detail=pdf_path.name)
-    pages = parse_pdf_to_pages(pdf_path)
-    reporter.emit(
-        "normalizing_document",
-        "completed",
-        "PDF parsed",
-        detail=f"{len(pages)} pages extracted",
-        current=len(pages),
-        total=len(pages) or 1,
-    )
-
-    if skip_index and tree_path.exists():
-        reporter.emit("building_tree", "completed", "Reusing document structure", detail=tree_path.name)
-        tree = json.loads(tree_path.read_text(encoding="utf-8"))
-    else:
-        reporter.emit("building_tree", "running", "Building document structure", detail=pdf_path.name)
-        tree = build_document_tree(pdf_path, config, data_dir)
-        reporter.emit("building_tree", "completed", "Document structure ready", detail=tree_path.name)
-
-    sections = get_analyzable_sections(tree)
-    reporter.emit(
-        "discovering_sections",
-        "completed",
-        "Sections discovered",
-        detail=f"{len(sections)} sections ready",
-        current=len(sections),
-        total=len(sections) or 1,
-    )
-    return tree, pages, pdf_path.stem, tree_path, sections

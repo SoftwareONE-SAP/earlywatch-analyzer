@@ -36,7 +36,7 @@ def detect_word_document_kind(path: Path) -> str:
     if head[:4] == b"\xd0\xcf\x11\xe0":
         return "ole_doc"
     if head[:2] == b"PK":
-        return "docx_zip"
+        return "ole_doc"
     return "unknown"
 
 

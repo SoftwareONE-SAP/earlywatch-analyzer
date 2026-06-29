@@ -2,7 +2,7 @@
 
 Endpoints:
 - POST /api/process-and-analyze        (combined conversion + analysis)
-- POST /api/analyze-ai                 (analyze markdown with AI)
+- POST /api/analyze-ai                 (analyze normalized HTML with AI)
 - POST /api/reprocess-ai               (delete old AI files then analyze again)
 """
 
@@ -31,7 +31,6 @@ router = APIRouter(prefix="/api", tags=["ai-workflow"])
 
 async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
     base_name, _ = os.path.splitext(original_blob_name)
-    markdown_blob_name = f"{base_name}.md"
     html_blob_name = original_blob_name if original_blob_name.lower().endswith((".htm", ".html")) else f"{base_name}.html"
     container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
 
@@ -46,7 +45,7 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
         # Delete all derived artifacts except the original and normalized source files.
         logger.info("[PROCESS] Cleaning derived blobs for %s", base_name)
         try:
-            preserved = {original_blob_name, markdown_blob_name, html_blob_name}
+            preserved = {original_blob_name, html_blob_name}
             blob_list = container_client.list_blobs(name_starts_with=base_name)
             for blob in blob_list:
                 if blob.name in preserved:
@@ -57,16 +56,14 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning("[PROCESS] Error deleting derived blobs: %s", e)
 
-        # Ensure normalized source exists; new Word/ZIP uploads use compact HTML,
-        # while existing/PDF uploads may still use markdown.
+        # Ensure normalized source exists.
         try:
             html_client = container_client.get_blob_client(html_blob_name)
-            markdown_client = container_client.get_blob_client(markdown_blob_name)
-            if not html_client.exists() and not markdown_client.exists():
+            if not html_client.exists():
                 logger.error("[PROCESS] Normalized source missing for %s", original_blob_name)
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Neither {html_blob_name} nor {markdown_blob_name} was found. Please re-upload the report.",
+                    detail=f"{html_blob_name} was not found. Please re-upload the report.",
                 )
         except HTTPException:
             raise
@@ -76,7 +73,7 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
 
         # Run analysis (normalized source guaranteed to exist)
         logger.info("[PROCESS] Starting workflow execution for %s", original_blob_name)
-        result = await ewa_orchestrator.execute_workflow(original_blob_name, skip_markdown=True)
+        result = await ewa_orchestrator.execute_workflow(original_blob_name)
         logger.info("[PROCESS] Workflow completed with result: %s", result)
         return result
     except HTTPException as http_err:
@@ -169,20 +166,18 @@ async def analyze_document_with_ai_endpoint(
 
     blob_name = request.blob_name
     base_name, extension = os.path.splitext(blob_name)
-    markdown_file = blob_name if extension.lower() == ".md" else f"{base_name}.md"
     html_file = blob_name if extension.lower() in {".htm", ".html"} else f"{base_name}.html"
 
     container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
     try:
         html_client = container_client.get_blob_client(html_file)
-        markdown_client = container_client.get_blob_client(markdown_file)
-        if not html_client.exists() and not markdown_client.exists():
+        if not html_client.exists():
             raise FileNotFoundError
     except Exception:
-        raise HTTPException(status_code=404, detail=f"Neither {html_file} nor {markdown_file} was found. Please process the document first.")
+        raise HTTPException(status_code=404, detail=f"{html_file} was not found. Please process the document first.")
 
     try:
-        result = await ewa_orchestrator.execute_workflow(markdown_file)
+        result = await ewa_orchestrator.execute_workflow(html_file)
         if not result.get("success", False):
             raise HTTPException(
                 status_code=result.get("status_code", 500),

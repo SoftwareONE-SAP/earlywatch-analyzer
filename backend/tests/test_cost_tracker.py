@@ -65,6 +65,25 @@ class CostTrackerTests(unittest.TestCase):
         self.assertEqual(0.0, usage["breakdown"][0]["cached_input_cost_usd"])
         self.assertTrue(any("cached_input_per_1m" in note for note in usage["notes"]))
 
+    def test_known_openai_model_uses_fallback_pricing(self) -> None:
+        tracker = CostTracker(pricing={})
+
+        tracker.record(
+            "phase0_planning",
+            "gpt-5.4",
+            input_tokens=34094,
+            output_tokens=8570,
+        )
+
+        usage = tracker.to_dict("sample")
+        breakdown = usage["breakdown"][0]
+
+        self.assertEqual(2.5, breakdown["pricing"]["input_per_1m"])
+        self.assertEqual(0.25, breakdown["pricing"]["cached_input_per_1m"])
+        self.assertEqual(15.0, breakdown["pricing"]["output_per_1m"])
+        self.assertGreater(breakdown["total_cost_usd"], 0)
+        self.assertGreater(usage["totals"]["cost_usd"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

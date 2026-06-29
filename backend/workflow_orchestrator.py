@@ -5,7 +5,7 @@ Thin wrapper that bridges the target project's Azure Blob Storage infrastructure
 with the v1 LangGraph-based analysis pipeline (ewa_pipeline).
 
 Flow:
-  1. Download markdown from Azure Blob Storage
+  1. Download compact HTML from Azure Blob Storage
   2. Save to a temp file on disk
   3. Run ewa_pipeline.services.pipeline.run_pipeline() (LangGraph analysis)
   4. Upload resulting Excel workbook + JSON artifacts back to Blob Storage
@@ -113,49 +113,38 @@ class EWAWorkflowOrchestrator:
     async def execute_workflow(
         self,
         blob_name: str,
-        skip_markdown: bool = False,
     ) -> dict:
         """
         Execute the full analysis workflow on a blob.
 
         Args:
-            blob_name: Name of the blob to analyze (can be .md or .pdf/.zip).
-            skip_markdown: If True, markdown already exists — skip conversion step.
+            blob_name: Name of the blob to analyze.
 
         Returns:
             Dict with success/error info and artifact blob names.
         """
         base_name = os.path.splitext(blob_name)[0]
-        md_blob_name = f"{base_name}.md"
         html_blob_name = blob_name if blob_name.lower().endswith((".htm", ".html")) else f"{base_name}.html"
         started_at = time.time()
 
         try:
             # 1. Download normalized source content from blob
-            source_suffix = ".html"
             logger.info("[WORKFLOW] Downloading compact HTML: %s", html_blob_name)
             try:
                 source_content = await asyncio.to_thread(
                     storage_service.get_text_content, html_blob_name
                 )
             except FileNotFoundError:
-                source_suffix = ".md"
-                logger.info("[WORKFLOW] Compact HTML not found; downloading markdown: %s", md_blob_name)
-                try:
-                    source_content = await asyncio.to_thread(
-                        storage_service.get_text_content, md_blob_name
-                    )
-                except FileNotFoundError:
-                    return {
-                        "success": False,
-                        "message": f"Neither {html_blob_name} nor {md_blob_name} was found in storage.",
-                        "status_code": 404,
-                        "error_hint": "Please upload and process the document first.",
-                    }
+                return {
+                    "success": False,
+                    "message": f"{html_blob_name} was not found in storage.",
+                    "status_code": 404,
+                    "error_hint": "Please upload and process the document first.",
+                }
 
             # 2. Run the LangGraph pipeline in a background thread
             result = await asyncio.to_thread(
-                self._run_pipeline_sync, source_content, base_name, source_suffix
+                self._run_pipeline_sync, source_content, base_name
             )
 
             if not result["success"]:
@@ -228,7 +217,7 @@ class EWAWorkflowOrchestrator:
         }
         result["cost_json"] = json.dumps(usage, indent=2)
 
-    def _run_pipeline_sync(self, source_content: str, base_name: str, source_suffix: str) -> dict:
+    def _run_pipeline_sync(self, source_content: str, base_name: str) -> dict:
         """
         Run the v1 LangGraph pipeline synchronously in a temp directory.
 
@@ -241,7 +230,7 @@ class EWAWorkflowOrchestrator:
         with tempfile.TemporaryDirectory(prefix="ewa_pipeline_") as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            input_path = tmpdir_path / f"{base_name}{source_suffix}"
+            input_path = tmpdir_path / f"{base_name}.html"
             input_path.write_text(source_content, encoding="utf-8")
 
             # Output workbook path
