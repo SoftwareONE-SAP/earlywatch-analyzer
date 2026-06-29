@@ -196,7 +196,6 @@ async def upload_file(
                 convert_doc_to_html,
                 uploaded_path,
                 os.path.join(temp_dir, "doc_html"),
-                prefer_word_com=False,
             )
             normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_path)
             normalized_extension = ".html"
