@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 FILENAME_YEAR_CUTOFF = 30
 FILENAME_YEAR_2000_OFFSET = 2000
 FILENAME_YEAR_1900_OFFSET = 1900
-SUPPORTED_UPLOAD_EXTENSIONS = (".zip", ".pdf", ".doc", ".docx", ".xml")
+SUPPORTED_UPLOAD_EXTENSIONS = (".doc",)
 
 # ---------------------------------------------------------------------------
 # Filename validation and metadata extraction
@@ -42,8 +42,8 @@ SUPPORTED_UPLOAD_EXTENSIONS = (".zip", ".pdf", ".doc", ".docx", ".xml")
 
 def generate_standardized_filename(file_metadata: Dict[str, Any], original_filename: str) -> str:
     """
-    Generate standardized filename in format: <SID>_<DD>_<MON>_<YEAR>.pdf
-    Example: ERP_07_Jun_25.pdf
+    Generate standardized filename in format: <SID>_<DD>_<MON>_<YEAR>.doc
+    Example: ERP_07_Jun_25.doc
     
     Args:
         file_metadata: Dict containing 'system_id' and 'report_date' or 'report_date_str'
@@ -79,7 +79,7 @@ def generate_standardized_filename(file_metadata: Dict[str, Any], original_filen
         # Get file extension from original filename
         _, ext = os.path.splitext(original_filename)
         if not ext:
-            ext = '.pdf'  # Default to PDF
+            ext = ".doc"
             
         # Format: <SID>_<DD>_<MON>_<YEAR>
         day = report_date.strftime("%d")
@@ -98,7 +98,7 @@ def generate_standardized_filename(file_metadata: Dict[str, Any], original_filen
 def validate_filename_and_extract_metadata(filename: str) -> Dict[str, Any]:
     """
     Validate filename format and extract system ID and report date.
-    Expected format: <SID>_ddmmyy.pdf (e.g., ERP_090625.pdf)
+    Expected format: <SID>_ddmmyy.doc (e.g., ERP_090625.doc)
     
     Returns:
         Dict with 'system_id', 'report_date', and 'report_date_str'
@@ -115,7 +115,7 @@ def validate_filename_and_extract_metadata(filename: str) -> Dict[str, Any]:
     
     if not match:
         raise ValueError(
-            f"Filename '{filename}' must follow format <SID>_ddmmyy.pdf (e.g., ERP_090625.pdf). "
+            f"Filename '{filename}' must follow format <SID>_ddmmyy.doc (e.g., ERP_090625.doc). "
             f"SID should be alphanumeric uppercase, date should be 6 digits (ddmmyy)."
         )
     
@@ -176,15 +176,13 @@ async def upload_file(
     if not file_name_lower.endswith(SUPPORTED_UPLOAD_EXTENSIONS):
         raise HTTPException(
             status_code=400,
-            detail="Only .zip, .pdf, .doc, .docx, and Word 2003 .xml files are supported.",
+            detail="Only .doc files are supported.",
         )
 
     try:
         import tempfile
-        import zipfile
         from converters.compact_html_converter import convert_html_to_compact_html
         from converters.doc_html_converter import convert_doc_to_html
-        from converters.pdf_markdown_converter import convert_pdf_to_markdown
         
         contents = await file.read()
         
@@ -193,54 +191,16 @@ async def upload_file(
             with open(uploaded_path, "wb") as f:
                 f.write(contents)
 
-            if file_name_lower.endswith(".zip"):
-                try:
-                    with zipfile.ZipFile(uploaded_path, "r") as zip_ref:
-                        real_temp = os.path.realpath(temp_dir)
-                        for member in zip_ref.namelist():
-                            dest = os.path.realpath(os.path.join(real_temp, member))
-                            if not (dest.startswith(real_temp + os.sep) or dest == real_temp):
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail="Invalid ZIP archive: path traversal detected.",
-                                )
-                        zip_ref.extractall(temp_dir)
-                except zipfile.BadZipFile:
-                    raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
-
-                # Find the .htm or .html file
-                html_file_path = None
-                for root, dirs, extracted_files in os.walk(temp_dir):
-                    for extracted_file in extracted_files:
-                        if extracted_file.lower().endswith((".htm", ".html")):
-                            html_file_path = os.path.join(root, extracted_file)
-                            break
-                    if html_file_path:
-                        break
-
-                if not html_file_path:
-                    raise HTTPException(status_code=400, detail="No .htm or .html file found in the uploaded zip.")
-
-                logger.info("Found HTML file in zip: %s", html_file_path)
-                normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_file_path)
-                normalized_extension = ".html"
-                content_type = "text/html"
-            elif file_name_lower.endswith((".doc", ".docx", ".xml")):
-                logger.info("Converting uploaded Word document to compact HTML: %s", uploaded_path)
-                html_path = await asyncio.to_thread(
-                    convert_doc_to_html,
-                    uploaded_path,
-                    os.path.join(temp_dir, "doc_html"),
-                    prefer_word_com=False,
-                )
-                normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_path)
-                normalized_extension = ".html"
-                content_type = "text/html"
-            else:
-                logger.info("Converting uploaded PDF to Markdown with pymupdf4llm: %s", uploaded_path)
-                normalized_content = await asyncio.to_thread(convert_pdf_to_markdown, uploaded_path)
-                normalized_extension = ".md"
-                content_type = "text/markdown"
+            logger.info("Converting uploaded Word document to compact HTML: %s", uploaded_path)
+            html_path = await asyncio.to_thread(
+                convert_doc_to_html,
+                uploaded_path,
+                os.path.join(temp_dir, "doc_html"),
+                prefer_word_com=False,
+            )
+            normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_path)
+            normalized_extension = ".html"
+            content_type = "text/html"
             
             if not normalized_content:
                 raise HTTPException(status_code=500, detail="Failed to normalize uploaded file.")
@@ -262,7 +222,7 @@ async def upload_file(
                 
             # Generate new filename based on extracted metadata.
             new_filename = generate_standardized_filename(file_metadata, file.filename)
-            blob_name = re.sub(r"\.(zip|pdf|docx?|xml)$", normalized_extension, new_filename, flags=re.IGNORECASE)
+            blob_name = re.sub(r"\.doc$", normalized_extension, new_filename, flags=re.IGNORECASE)
             
             blob_client = blob_service_client.get_blob_client(
                 container=AZURE_STORAGE_CONTAINER_NAME, blob=blob_name
@@ -298,7 +258,7 @@ async def upload_file(
                 metadata,
             )
             return {
-                "filename": blob_name,  # Return the new standardized filename ending in .md
+                "filename": blob_name,
                 "original_filename": file.filename,  # Include original for reference
                 "customer_name": customer_name,
                 "system_id": file_metadata["system_id"],
@@ -343,10 +303,6 @@ async def list_files(_user: dict = Depends(require_auth())):
                     ai_analyzed_files[base_name[:-3]] = True  # strip _AI
                 elif base_name.endswith("_workbook_payload"):
                     ai_analyzed_files[base_name[:-17]] = True  # strip _workbook_payload
-            elif ext == ".md":
-                normalized_files[base_name] = True
-                if base_name.endswith("_AI"):
-                    ai_analyzed_files[base_name[:-3]] = True
             elif ext in {".htm", ".html"}:
                 normalized_files[base_name] = True
                 if base_name.endswith("_AI"):
@@ -360,7 +316,7 @@ async def list_files(_user: dict = Depends(require_auth())):
         original_uploads = {
             os.path.splitext(b.name)[0]
             for b in blob_list
-            if b.name.lower().endswith((".pdf", ".zip", ".doc", ".docx", ".xml"))
+            if b.name.lower().endswith(".doc")
         }
         
         for blob in blob_list:
@@ -378,8 +334,7 @@ async def list_files(_user: dict = Depends(require_auth())):
                 continue  # skip V2 workbook artifacts from main listing
                 
             # If it's a normalized file with a corresponding original upload, avoid duplicates.
-            # Skip it so we don't show duplicates. For new zip uploads, only the .md exists.
-            if name_low.endswith((".md", ".html", ".htm")) and base_name in original_uploads:
+            if name_low.endswith((".html", ".htm")) and base_name in original_uploads:
                 continue
 
             blob_client = container_client.get_blob_client(blob.name)
@@ -502,7 +457,7 @@ async def delete_analysis(
 
         # Allowlist of derivative suffixes that may be deleted for this document
         _DERIVATIVE_SUFFIXES = (
-            ".md", ".html", ".htm", ".json", ".xlsx",
+            ".html", ".htm", ".json", ".xlsx",
             "_workbook.xlsx", "_workbook_payload.json",
             "_v2_usage.json",
         )
@@ -555,12 +510,12 @@ async def download_file(
         if not blob_service_client:
             raise HTTPException(status_code=500, detail="Azure Blob Service client not initialized")
 
-        if blob_name.endswith((".md", ".html", ".htm")):
+        if blob_name.endswith((".html", ".htm")):
             try:
                 content = await asyncio.to_thread(storage_service.get_text_content, blob_name)
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail=f"File {blob_name} not found") from None
-            content_type = "text/html" if blob_name.endswith((".html", ".htm")) else "text/markdown"
+            content_type = "text/html"
         elif blob_name.endswith(".json"):
             try:
                 content = await asyncio.to_thread(storage_service.get_text_content, blob_name)
@@ -575,17 +530,13 @@ async def download_file(
 
             if blob_name.endswith(".xlsx"):
                 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            elif blob_name.endswith(".pdf"):
-                content_type = "application/pdf"
             else:
                 content_type = "application/octet-stream"
 
         if isinstance(content, str):
             content = content.encode("utf-8")
 
-        if blob_name.endswith(".pdf"):
-            content_type = "application/pdf"
-        elif blob_name.endswith(".xlsx"):
+        if blob_name.endswith(".xlsx"):
             content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
         disposition = "attachment" if blob_name.endswith(".xlsx") else "inline"

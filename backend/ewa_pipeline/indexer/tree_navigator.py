@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+﻿from dataclasses import dataclass, field
 
 
 _SKIP_TITLES = {
@@ -16,8 +16,7 @@ class TreeNode:
     page_end: int = 0
     level: int = 0
     children: list["TreeNode"] = field(default_factory=list)
-    # Populated for markdown-based nodes (md_to_tree stores text directly in nodes).
-    # Empty for PDF-based nodes, whose content is fetched via the pages dict.
+    # Populated for compact-HTML nodes.
     content: str = ""
 
 
@@ -42,8 +41,6 @@ def _parse_node(raw: dict, level: int = 0) -> "TreeNode":
         page_start=raw.get("start_index", 0),
         page_end=raw.get("end_index", 0),
         level=level,
-        # "text" is present in markdown-based trees (md_to_tree with if_add_node_text="yes").
-        # Absent in PDF-based trees, which use page ranges instead.
         content=raw.get("text", ""),
     )
     for child_raw in raw.get("nodes", []):
@@ -88,22 +85,17 @@ def get_node_content(pages: dict[int, str], node: TreeNode) -> str:
     """
     Extract content for a node.
 
-    For markdown-based nodes (md_to_tree), content is stored directly in
-    node.content — the pages dict is not needed and may be empty ({}).
-
-    For PDF-based nodes, content is fetched from the 1-indexed pages dict
-    using the node's page_start / page_end range.
+    For compact-HTML nodes, content is stored directly in node.content.
+    The pages dict is retained for the caller contract and is normally empty.
     """
-    # Markdown path: content is embedded in the node
     if node.content:
         return node.content
 
-    # PDF path: look up page range
     start = node.page_start
     end = node.page_end
 
     if start <= 0 or end <= 0 or end < start:
-        # Container/heading node with no direct content — return summary only
+        # Container/heading node with no direct content; return summary only.
         return node.summary or ""
 
     parts = [pages[p] for p in range(start, end + 1) if p in pages]
@@ -126,3 +118,4 @@ def tree_to_summary(tree: dict) -> str:
             + (f": {snippet}" if snippet else "")
         )
     return "\n".join(lines)
+

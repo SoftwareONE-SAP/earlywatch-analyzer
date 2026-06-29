@@ -11,10 +11,10 @@ from typing import Optional
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-from converters.html_markdown_converter import (
+from converters.icon_classifier import (
     build_icon_map,
     classify_icon,
-    _detect_encoding,
+    detect_encoding,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,7 @@ def convert_html_to_compact_html(html_path: str | Path, output_path: str | Path 
     icon_map = build_icon_map(str(images_dir)) if images_dir.is_dir() else {}
 
     raw_bytes = html_path.read_bytes()
-    source = raw_bytes.decode(_detect_encoding(raw_bytes), errors="replace")
+    source = raw_bytes.decode(detect_encoding(raw_bytes), errors="replace")
     soup = BeautifulSoup(source, "html.parser")
     body = soup.find("body") or soup
 

@@ -91,11 +91,11 @@ class CostTracker:
         output_cost = output_tokens / 1_000_000 * pricing.get("output_per_1m", 0.0)
         return input_cost, cached_input_cost, output_cost
 
-    def to_dict(self, pdf_name: str = "") -> dict:
+    def to_dict(self, document_name: str = "") -> dict:
         breakdown = []
         notes = [
             "Prices come from config.yaml when present; otherwise known OpenAI model rates are used as a fallback.",
-            "Document indexing and PageIndex token usage are not included here because those steps run separately via LiteLLM.",
+            "Document normalization token usage is not included here.",
         ]
         total_calls = total_input = total_cached_input = total_output = 0
         total_cost = 0.0
@@ -149,7 +149,7 @@ class CostTracker:
 
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "pdf": pdf_name,
+            "document": document_name,
             "breakdown": breakdown,
             "totals": {
                 "calls": total_calls,
@@ -163,6 +163,6 @@ class CostTracker:
             "notes": list(dict.fromkeys(notes)),
         }
 
-    def save(self, path: Path, pdf_name: str = "") -> None:
+    def save(self, path: Path, document_name: str = "") -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(pdf_name), indent=2), encoding="utf-8")
+        path.write_text(json.dumps(self.to_dict(document_name), indent=2), encoding="utf-8")

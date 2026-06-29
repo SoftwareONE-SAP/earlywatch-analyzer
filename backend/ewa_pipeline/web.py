@@ -35,8 +35,8 @@ app.add_middleware(
 @app.post("/api/jobs")
 async def create_job(file: UploadFile = File(...)):
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".pdf", ".zip", ".doc", ".docx", ".xml"}:
-        raise HTTPException(status_code=400, detail="Only .pdf, .zip, .doc, .docx, and Word 2003 .xml files are supported.")
+    if suffix != ".doc":
+        raise HTTPException(status_code=400, detail="Only .doc files are supported.")
 
     upload_path = UPLOAD_TMP / f"{uuid.uuid4().hex[:12]}_{Path(file.filename).name}"
     upload_path.write_bytes(await file.read())

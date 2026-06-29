@@ -1,4 +1,4 @@
-"""Convert Word .doc/.docx files to HTML (WordML, Word COM, or LibreOffice)."""
+"""Convert Word .doc files to HTML (WordML, Word COM, or LibreOffice)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from converters.html_markdown_converter import classify_icon
+from converters.icon_classifier import classify_icon
 from converters.word_com_html_converter import (
     WordComNotAvailableError,
     convert_doc_to_html_word_com,
@@ -336,17 +336,17 @@ def convert_doc_to_html(
     Convert a Word document to HTML.
 
     Routing:
-      - Word 2003 XML (.doc/.xml extension): Microsoft Word COM on Windows (best fidelity),
+      - Word 2003 XML (.doc extension): Microsoft Word COM on Windows (best fidelity),
         then LibreOffice with MS Word 2003 XML filter as fallback.
-      - OLE .doc / .docx: LibreOffice headless.
+      - OLE .doc: LibreOffice headless.
     """
     doc_path = Path(doc_path).resolve()
     if not doc_path.is_file():
         raise FileNotFoundError(f"Document not found: {doc_path}")
 
     suffix = doc_path.suffix.lower()
-    if suffix not in {".doc", ".docx", ".xml"}:
-        raise ValueError(f"Expected .doc, .docx, or .xml, got: {suffix}")
+    if suffix != ".doc":
+        raise ValueError(f"Expected .doc, got: {suffix}")
 
     if output_dir is None:
         output_dir = Path(tempfile.mkdtemp(prefix="ewa-doc-html-"))

@@ -20,9 +20,9 @@ EWA Analyzer is a web application for processing SAP EarlyWatch exports, generat
 
 ## Core runtime flow
 
-1. Upload a ZIP that contains EWA HTML export content.
-2. Backend extracts and converts content to markdown.
-3. AI pipeline processes markdown and generates analysis outputs.
+1. Upload an EWA `.doc` report.
+2. Backend converts the document to compact HTML.
+3. AI pipeline processes the compact HTML and generates analysis outputs.
 4. Results are stored in Blob Storage and exposed through API endpoints.
 5. Frontend consumes APIs for listing, viewing, and exporting analysis assets.
 
