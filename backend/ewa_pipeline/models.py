@@ -10,7 +10,6 @@ def get_orchestrator_model(config: Config) -> AzureChatOpenAI:
         api_version=config.azure_openai.api_version,
         use_responses_api=True,
         reasoning_effort=config.reasoning.orchestrator,
-        temperature=0.1,
         max_retries=6,
     )
 
@@ -23,7 +22,6 @@ def get_subagent_model(config: Config) -> AzureChatOpenAI:
         api_version=config.azure_openai.api_version,
         use_responses_api=True,
         reasoning_effort=config.reasoning.deep,
-        temperature=0.1,
         max_retries=6,
     )
 
@@ -36,7 +34,6 @@ def get_cross_ref_model(config: Config) -> AzureChatOpenAI:
         api_version=config.azure_openai.api_version,
         use_responses_api=True,
         reasoning_effort=config.reasoning.orchestrator,
-        temperature=0.1,
         max_retries=6,
     )
 
