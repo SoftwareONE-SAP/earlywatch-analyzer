@@ -4,6 +4,9 @@ from __future__ import annotations
 import os
 
 
+REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
+
+
 def _get_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None:
@@ -28,6 +31,17 @@ def _get_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
     parsed = tuple(item.strip() for item in value.split(",") if item.strip())
     return parsed or default
+
+
+def get_reasoning_effort(name: str) -> str:
+    """Return a required, validated Responses API reasoning effort."""
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        raise RuntimeError(f"Required environment variable {name} is not set.")
+    if value not in REASONING_EFFORTS:
+        allowed = ", ".join(sorted(REASONING_EFFORTS))
+        raise RuntimeError(f"{name} must be one of: {allowed}.")
+    return value
 
 
 CHAT_HISTORY_LIMIT = _get_int("CHAT_HISTORY_LIMIT", 10)

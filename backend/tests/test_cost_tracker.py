@@ -84,6 +84,48 @@ class CostTrackerTests(unittest.TestCase):
         self.assertGreater(breakdown["total_cost_usd"], 0)
         self.assertGreater(usage["totals"]["cost_usd"], 0)
 
+    def test_gpt_5_6_luna_deployment_uses_family_pricing_and_cache_writes(self) -> None:
+        tracker = CostTracker(pricing={})
+
+        tracker.record(
+            "phase1_domain_analysis",
+            "ewa-gpt-5.6-luna-prod",
+            input_tokens=1_000_000,
+            output_tokens=100_000,
+            cached_input_tokens=200_000,
+            cache_write_tokens=100_000,
+        )
+
+        usage = tracker.to_dict("sample")
+        breakdown = usage["breakdown"][0]
+
+        self.assertEqual(1.0, breakdown["pricing"]["input_per_1m"])
+        self.assertEqual(0.1, breakdown["pricing"]["cached_input_per_1m"])
+        self.assertEqual(1.25, breakdown["pricing"]["cache_write_per_1m"])
+        self.assertEqual(6.0, breakdown["pricing"]["output_per_1m"])
+        self.assertEqual(700_000, breakdown["billable_input_tokens"])
+        self.assertAlmostEqual(0.7, breakdown["input_cost_usd"])
+        self.assertAlmostEqual(0.02, breakdown["cached_input_cost_usd"])
+        self.assertAlmostEqual(0.125, breakdown["cache_write_cost_usd"])
+        self.assertAlmostEqual(0.6, breakdown["output_cost_usd"])
+        self.assertAlmostEqual(1.445, breakdown["total_cost_usd"])
+
+    def test_exact_deployment_pricing_overrides_family_fallback(self) -> None:
+        tracker = CostTracker(
+            pricing={
+                "ewa-gpt-5.6-luna-prod": {
+                    "input_per_1m": 9.0,
+                    "cached_input_per_1m": 8.0,
+                    "cache_write_per_1m": 7.0,
+                    "output_per_1m": 6.0,
+                }
+            }
+        )
+
+        tracker.record("phase", "ewa-gpt-5.6-luna-prod", 1_000_000, 0)
+
+        self.assertEqual(9.0, tracker.to_dict()["breakdown"][0]["pricing"]["input_per_1m"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -163,6 +163,9 @@ All configuration is via environment variables — see `.env.example` for the fu
 | `V2_ORCHESTRATOR_MODEL` | Deployment for planner, cross-reference, and synthesis (most capable). |
 | `V2_SPECIALIST_MODEL` | Deployment for the parallel domain analysts (faster / cheaper). |
 | `V2_ROUTER_MODEL` | Deployment for routing, page indexing, and chat retrieval (fastest). |
+| `CHAT_REASONING_EFFORT` | Required reasoning effort for document chat. |
+| `ORCHESTRATOR_REASONING_EFFORT` | Required reasoning effort for planner, cross-reference, and synthesis. |
+| `DEEP_REASONING_EFFORT` | Required reasoning effort for specialist/domain-analysis workers. |
 | `AUTH_ENABLED` / `TRUST_PLATFORM_AUTH_HEADERS` | Entra authentication behaviour in hosted environments. |
 
 > **Never commit real keys or connection strings.** Store secrets in Azure Container App settings, Key Vault, or a CI/CD secret store.

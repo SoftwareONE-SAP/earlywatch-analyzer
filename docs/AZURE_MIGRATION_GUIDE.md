@@ -153,6 +153,25 @@ docker push "$acrLoginServer/ewa-backend:latest"
 docker push "$acrLoginServer/ewa-sapui5:latest"
 ```
 
+Configure model deployments and reasoning effort on the Container App:
+
+```powershell
+az containerapp update --name $app --resource-group $rg --set-env-vars `
+  AZURE_STORAGE_CONNECTION_STRING=secretref:storage-connection-string `
+  AZURE_STORAGE_CONTAINER_NAME=$container `
+  AZURE_OPENAI_ENDPOINT=<your-openai-endpoint> `
+  AZURE_OPENAI_API_KEY=secretref:openai-api-key `
+  AZURE_OPENAI_API_VERSION=<your-api-version> `
+  V2_ORCHESTRATOR_MODEL=<your-orchestrator-deployment> `
+  V2_SPECIALIST_MODEL=<your-specialist-deployment> `
+  V2_ROUTER_MODEL=<your-router-deployment> `
+  CHAT_REASONING_EFFORT=medium `
+  ORCHESTRATOR_REASONING_EFFORT=medium `
+  DEEP_REASONING_EFFORT=medium `
+  AUTH_ENABLED=true `
+  TRUST_PLATFORM_AUTH_HEADERS=true
+```
+
 ## 10. Point Web Apps At Images
 
 ```powershell

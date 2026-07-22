@@ -4,14 +4,20 @@ from pydantic import BaseModel
 
 
 class TokenUsage(BaseModel):
+    phase0_model: str = ""
     phase0_input_tokens: int = 0
     phase0_cached_input_tokens: int = 0
+    phase0_cache_write_tokens: int = 0
     phase0_output_tokens: int = 0
+    phase1_model: str = ""
     phase1_input_tokens: int = 0
     phase1_cached_input_tokens: int = 0
+    phase1_cache_write_tokens: int = 0
     phase1_output_tokens: int = 0
+    phase2_model: str = ""
     phase2_input_tokens: int = 0
     phase2_cached_input_tokens: int = 0
+    phase2_cache_write_tokens: int = 0
     phase2_output_tokens: int = 0
 
     @property
@@ -24,7 +30,20 @@ class TokenUsage(BaseModel):
 
     @property
     def total_billable_input_tokens(self) -> int:
-        return max(self.total_input_tokens - self.total_cached_input_tokens, 0)
+        return max(
+            self.total_input_tokens
+            - self.total_cached_input_tokens
+            - self.total_cache_write_tokens,
+            0,
+        )
+
+    @property
+    def total_cache_write_tokens(self) -> int:
+        return (
+            self.phase0_cache_write_tokens
+            + self.phase1_cache_write_tokens
+            + self.phase2_cache_write_tokens
+        )
 
     @property
     def total_output_tokens(self) -> int:

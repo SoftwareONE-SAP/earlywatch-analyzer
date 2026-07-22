@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Literal
 from pydantic import BaseModel
 import yaml
 
@@ -17,14 +18,21 @@ class AzureConfig(BaseModel):
     deployments: DeploymentsConfig
 
 
+class ReasoningConfig(BaseModel):
+    orchestrator: Literal["none", "low", "medium", "high", "xhigh", "max"]
+    deep: Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
 class ModelPrice(BaseModel):
     input_per_1m: float = 0.0   # USD per million input tokens
     cached_input_per_1m: float | None = None  # USD per million cached input tokens
+    cache_write_per_1m: float | None = None  # USD per million cache-write tokens
     output_per_1m: float = 0.0  # USD per million output tokens
 
 
 class Config(BaseModel):
     azure_openai: AzureConfig
+    reasoning: ReasoningConfig
     pricing: dict[str, ModelPrice] = {}
 
     def pricing_dict(self) -> dict[str, dict[str, float]]:
@@ -37,6 +45,8 @@ class Config(BaseModel):
             }
             if value.cached_input_per_1m is not None:
                 entry["cached_input_per_1m"] = value.cached_input_per_1m
+            if value.cache_write_per_1m is not None:
+                entry["cache_write_per_1m"] = value.cache_write_per_1m
             pricing[key] = entry
         return pricing
 
@@ -49,6 +59,26 @@ def _first_env(*names: str) -> str:
     return ""
 
 
+def _reasoning_env() -> dict[str, str]:
+    values = {
+        "orchestrator": _first_env("ORCHESTRATOR_REASONING_EFFORT"),
+        "deep": _first_env("DEEP_REASONING_EFFORT"),
+    }
+    missing = [
+        env_name
+        for field, env_name in (
+            ("orchestrator", "ORCHESTRATOR_REASONING_EFFORT"),
+            ("deep", "DEEP_REASONING_EFFORT"),
+        )
+        if not values[field]
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "Missing required reasoning environment variables: " + ", ".join(missing)
+        )
+    return values
+
+
 def _build_env_config() -> Config:
     endpoint = _first_env("AZURE_OPENAI_ENDPOINT")
     api_key = _first_env("AZURE_OPENAI_API_KEY")
@@ -57,6 +87,7 @@ def _build_env_config() -> Config:
     orchestrator_deployment = _first_env("V2_ORCHESTRATOR_MODEL")
     specialist_deployment = _first_env("V2_SPECIALIST_MODEL")
     router_deployment = _first_env("V2_ROUTER_MODEL")
+    reasoning = _reasoning_env()
 
     missing = []
     if not endpoint:
@@ -69,7 +100,6 @@ def _build_env_config() -> Config:
         missing.append("V2_SPECIALIST_MODEL")
     if not router_deployment:
         missing.append("V2_ROUTER_MODEL")
-
     if missing:
         missing_list = ", ".join(missing)
         raise FileNotFoundError(
@@ -89,6 +119,7 @@ def _build_env_config() -> Config:
                     "router": router_deployment,
                 },
             },
+            "reasoning": reasoning,
             "pricing": {},
         }
     )
@@ -108,6 +139,7 @@ def load_config(path: Path | None = None) -> Config:
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
+        data["reasoning"] = _reasoning_env()
         return Config.model_validate(data)
 
     return _build_env_config()

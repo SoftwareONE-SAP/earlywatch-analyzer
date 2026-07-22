@@ -64,19 +64,19 @@ class EwaAnalysisState(TypedDict):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _usage_details(meta: Any, key: str) -> int:
+def _usage_details(meta: Any, key: str, *detail_keys: str) -> int:
     if isinstance(meta, dict):
         details = meta.get(key) or {}
         if isinstance(details, dict):
-            return int(details.get("cache_read", 0) or 0)
+            return int(next((details.get(k) for k in detail_keys if details.get(k)), 0) or 0)
         return 0
 
     details = getattr(meta, key, None)
     if details is None:
         return 0
     if isinstance(details, dict):
-        return int(details.get("cache_read", 0) or 0)
-    return int(getattr(details, "cache_read", 0) or 0)
+        return int(next((details.get(k) for k in detail_keys if details.get(k)), 0) or 0)
+    return int(next((getattr(details, k, 0) for k in detail_keys if getattr(details, k, 0)), 0) or 0)
 
 
 def _usage_value(meta: Any, key: str) -> int:
@@ -85,12 +85,19 @@ def _usage_value(meta: Any, key: str) -> int:
     return int(getattr(meta, key, 0) or 0)
 
 
-def _tokens(raw: Any) -> tuple[int, int, int]:
+def _tokens(raw: Any) -> tuple[int, int, int, int]:
     meta = getattr(raw, "usage_metadata", None) or {}
     return (
         _usage_value(meta, "input_tokens"),
         _usage_value(meta, "output_tokens"),
-        _usage_details(meta, "input_token_details"),
+        _usage_details(meta, "input_token_details", "cache_read"),
+        _usage_details(
+            meta,
+            "input_token_details",
+            "cache_write_tokens",
+            "cache_write",
+            "cache_creation",
+        ),
     )
 
 
@@ -151,13 +158,14 @@ def build_ewa_graph(
         result = planner_chain.invoke(
             [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
         )
-        inp, out, cached_inp = _tokens(result.get("raw"))
+        inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
         cost_tracker.record(
             "phase0_planning",
             orchestrator_deployment,
             inp,
             out,
             cached_input_tokens=cached_inp,
+            cache_write_tokens=cache_write,
         )
 
         plan: OrchestratorPlan = result["parsed"]
@@ -228,13 +236,14 @@ def build_ewa_graph(
         )
         try:
             result = domain_chain.invoke([HumanMessage(content=prompt)])
-            inp, out, cached_inp = _tokens(result.get("raw"))
+            inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
             cost_tracker.record(
                 "phase1_domain_analysis",
                 specialist_deployment,
                 inp,
                 out,
                 cached_input_tokens=cached_inp,
+                cache_write_tokens=cache_write,
             )
             da: DomainAnalysis = result["parsed"]
             return {"domain_analyses": [da]}
@@ -258,13 +267,14 @@ def build_ewa_graph(
         )
         try:
             result = xref_chain.invoke([HumanMessage(content=prompt)])
-            inp, out, cached_inp = _tokens(result.get("raw"))
+            inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
             cost_tracker.record(
                 "phase2_cross_reference",
                 orchestrator_deployment,
                 inp,
                 out,
                 cached_input_tokens=cached_inp,
+                cache_write_tokens=cache_write,
             )
             xref_list: CrossReferenceList = result["parsed"]
             return {"cross_references": xref_list.items}
@@ -303,13 +313,14 @@ Write the final synthesis:
             result = synth_chain.invoke(
                 [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
-            inp, out, cached_inp = _tokens(result.get("raw"))
+            inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
             cost_tracker.record(
                 "phase2_synthesis",
                 orchestrator_deployment,
                 inp,
                 out,
                 cached_input_tokens=cached_inp,
+                cache_write_tokens=cache_write,
             )
             synthesis: SynthesisResult = result["parsed"]
             return {

@@ -32,6 +32,30 @@ sap.ui.define([
         maximumFractionDigits: 6
     });
     var OPENAI_FALLBACK_PRICING = {
+        "gpt-5.6-sol": {
+            input_per_1m: 5.00,
+            cached_input_per_1m: 0.50,
+            cache_write_per_1m: 6.25,
+            output_per_1m: 30.00
+        },
+        "gpt-5.6-terra": {
+            input_per_1m: 2.50,
+            cached_input_per_1m: 0.25,
+            cache_write_per_1m: 3.125,
+            output_per_1m: 15.00
+        },
+        "gpt-5.6-luna": {
+            input_per_1m: 1.00,
+            cached_input_per_1m: 0.10,
+            cache_write_per_1m: 1.25,
+            output_per_1m: 6.00
+        },
+        "gpt-5.6": {
+            input_per_1m: 5.00,
+            cached_input_per_1m: 0.50,
+            cache_write_per_1m: 6.25,
+            output_per_1m: 30.00
+        },
         "gpt-5.4": {
             input_per_1m: 2.50,
             cached_input_per_1m: 0.25,
@@ -298,6 +322,7 @@ sap.ui.define([
                 items: [
                     this._makeStat(this._formatNumber(oTotals.input_tokens), "Input Tokens", "None"),
                     this._makeStat(this._formatNumber(oTotals.cached_input_tokens), "Cached Input", "Information"),
+                    this._makeStat(this._formatNumber(oTotals.cache_write_tokens), "Cache Write", "Information"),
                     this._makeStat(this._formatNumber(oTotals.output_tokens), "Output Tokens", "None"),
                     this._makeStat(this._formatNumber(oTotals.total_tokens), "Total Tokens", "None"),
                     this._makeStat(this._formatCurrency(oTotals.cost_usd), "Run Cost (USD)", "Success"),
@@ -306,7 +331,7 @@ sap.ui.define([
             }).addStyleClass("sapUiSmallMarginBottom"));
 
             var oUsageTable = new Table({ width: "100%", fixedLayout: false }).addStyleClass("sapUiSmallMarginBottom");
-            ["Phase", "Model", "Calls", "Input", "Cached", "Billable", "Output", "Cost"].forEach(function (sHeader) {
+            ["Phase", "Model", "Calls", "Input", "Cached", "Cache Write", "Billable", "Output", "Cost"].forEach(function (sHeader) {
                 oUsageTable.addColumn(new Column({
                     header: new Text({ text: sHeader, wrapping: false }),
                     minScreenWidth: "Tablet",
@@ -321,6 +346,7 @@ sap.ui.define([
                 oItem.addCell(new Text({ text: this._formatNumber(oEntry.calls) }));
                 oItem.addCell(new Text({ text: this._formatNumber(oEntry.input_tokens) }));
                 oItem.addCell(new Text({ text: this._formatNumber(oEntry.cached_input_tokens) }));
+                oItem.addCell(new Text({ text: this._formatNumber(oEntry.cache_write_tokens) }));
                 oItem.addCell(new Text({ text: this._formatNumber(oEntry.billable_input_tokens) }));
                 oItem.addCell(new Text({ text: this._formatNumber(oEntry.output_tokens) }));
                 oItem.addCell(new ObjectStatus({
@@ -361,9 +387,10 @@ sap.ui.define([
                 var oPricing = this._pricingForEntry(oPricedEntry);
                 var nInputTokens = Number(oPricedEntry.input_tokens || 0);
                 var nCachedInputTokens = Number(oPricedEntry.cached_input_tokens || 0);
+                var nCacheWriteTokens = Number(oPricedEntry.cache_write_tokens || 0);
                 var nOutputTokens = Number(oPricedEntry.output_tokens || 0);
                 var nBillableInputTokens = Math.max(
-                    Number(oPricedEntry.billable_input_tokens || 0) || (nInputTokens - nCachedInputTokens),
+                    Number(oPricedEntry.billable_input_tokens || 0) || (nInputTokens - nCachedInputTokens - nCacheWriteTokens),
                     0
                 );
 
@@ -374,10 +401,12 @@ sap.ui.define([
                     oPricedEntry.pricing = oPricing;
                     oPricedEntry.input_cost_usd = this._roundCost(nBillableInputTokens / 1000000 * oPricing.input_per_1m);
                     oPricedEntry.cached_input_cost_usd = this._roundCost(nCachedInputTokens / 1000000 * oPricing.cached_input_per_1m);
+                    oPricedEntry.cache_write_cost_usd = this._roundCost(nCacheWriteTokens / 1000000 * oPricing.cache_write_per_1m);
                     oPricedEntry.output_cost_usd = this._roundCost(nOutputTokens / 1000000 * oPricing.output_per_1m);
                     oPricedEntry.total_cost_usd = this._roundCost(
                         oPricedEntry.input_cost_usd +
                         oPricedEntry.cached_input_cost_usd +
+                        oPricedEntry.cache_write_cost_usd +
                         oPricedEntry.output_cost_usd
                     );
                 }
@@ -413,6 +442,7 @@ sap.ui.define([
                 return {
                     input_per_1m: Number(oCurrentPricing.input_per_1m || 0),
                     cached_input_per_1m: Number(oCurrentPricing.cached_input_per_1m || 0),
+                    cache_write_per_1m: Number(oCurrentPricing.cache_write_per_1m || (oFallbackPricing && oFallbackPricing.cache_write_per_1m) || 0),
                     output_per_1m: Number(oCurrentPricing.output_per_1m || 0)
                 };
             }
@@ -425,12 +455,25 @@ sap.ui.define([
 
             return !Number(oPricing.input_per_1m || 0) &&
                 !Number(oPricing.cached_input_per_1m || 0) &&
+                !Number(oPricing.cache_write_per_1m || 0) &&
                 !Number(oPricing.output_per_1m || 0);
         },
 
         _normalizeModelName: function (sModel) {
             var sValue = String(sModel || "").toLowerCase();
 
+            if (sValue.indexOf("gpt-5.6-luna") !== -1) {
+                return "gpt-5.6-luna";
+            }
+            if (sValue.indexOf("gpt-5.6-terra") !== -1) {
+                return "gpt-5.6-terra";
+            }
+            if (sValue.indexOf("gpt-5.6-sol") !== -1) {
+                return "gpt-5.6-sol";
+            }
+            if (sValue.indexOf("gpt-5.6") !== -1) {
+                return "gpt-5.6";
+            }
             if (sValue.indexOf("gpt-5.4-mini") !== -1) {
                 return "gpt-5.4-mini";
             }
@@ -457,23 +500,26 @@ sap.ui.define([
             var aBreakdown = [
                 this._usageEntryFromPayload(
                     "phase0_planning",
-                    "gpt-5.4",
+                    oTokenUsage.phase0_model || "gpt-5.4",
                     oTokenUsage.phase0_input_tokens,
                     oTokenUsage.phase0_cached_input_tokens,
+                    oTokenUsage.phase0_cache_write_tokens,
                     oTokenUsage.phase0_output_tokens
                 ),
                 this._usageEntryFromPayload(
                     "phase1_domain_analysis",
-                    "gpt-5.4-mini",
+                    oTokenUsage.phase1_model || "gpt-5.4-mini",
                     oTokenUsage.phase1_input_tokens,
                     oTokenUsage.phase1_cached_input_tokens,
+                    oTokenUsage.phase1_cache_write_tokens,
                     oTokenUsage.phase1_output_tokens
                 ),
                 this._usageEntryFromPayload(
                     "phase2_synthesis",
-                    "gpt-5.4",
+                    oTokenUsage.phase2_model || "gpt-5.4",
                     oTokenUsage.phase2_input_tokens,
                     oTokenUsage.phase2_cached_input_tokens,
+                    oTokenUsage.phase2_cache_write_tokens,
                     oTokenUsage.phase2_output_tokens
                 )
             ];
@@ -481,6 +527,7 @@ sap.ui.define([
             var oTotals = aBreakdown.reduce(function (oAcc, oEntry) {
                 oAcc.input_tokens += oEntry.input_tokens;
                 oAcc.cached_input_tokens += oEntry.cached_input_tokens;
+                oAcc.cache_write_tokens += oEntry.cache_write_tokens;
                 oAcc.billable_input_tokens += oEntry.billable_input_tokens;
                 oAcc.output_tokens += oEntry.output_tokens;
                 oAcc.total_tokens += oEntry.input_tokens + oEntry.output_tokens;
@@ -489,6 +536,7 @@ sap.ui.define([
                 calls: 0,
                 input_tokens: 0,
                 cached_input_tokens: 0,
+                cache_write_tokens: 0,
                 billable_input_tokens: 0,
                 output_tokens: 0,
                 total_tokens: 0,
@@ -504,9 +552,10 @@ sap.ui.define([
             };
         },
 
-        _usageEntryFromPayload: function (sPhase, sModel, iInput, iCachedInput, iOutput) {
+        _usageEntryFromPayload: function (sPhase, sModel, iInput, iCachedInput, iCacheWrite, iOutput) {
             var nInput = Number(iInput || 0);
             var nCachedInput = Number(iCachedInput || 0);
+            var nCacheWrite = Number(iCacheWrite || 0);
             var nOutput = Number(iOutput || 0);
 
             return {
@@ -515,7 +564,8 @@ sap.ui.define([
                 calls: 0,
                 input_tokens: nInput,
                 cached_input_tokens: nCachedInput,
-                billable_input_tokens: Math.max(nInput - nCachedInput, 0),
+                cache_write_tokens: nCacheWrite,
+                billable_input_tokens: Math.max(nInput - nCachedInput - nCacheWrite, 0),
                 output_tokens: nOutput,
                 pricing: OPENAI_FALLBACK_PRICING[sModel],
                 total_cost_usd: 0

@@ -45,6 +45,9 @@ Required for the backend:
 | `AZURE_OPENAI_PARAM_MODEL` | Legacy fallback — see V2 pipeline variables below. |
 | `AZURE_OPENAI_FAST_MODEL` | Legacy fallback — see V2 pipeline variables below. |
 | `AZURE_OPENAI_CHAT_MODEL` | Legacy fallback — see V2 pipeline variables below. |
+| `CHAT_REASONING_EFFORT` | Reasoning effort for document chat. Required. |
+| `ORCHESTRATOR_REASONING_EFFORT` | Reasoning effort for planner, cross-reference, and synthesis. Required. |
+| `DEEP_REASONING_EFFORT` | Reasoning effort for specialist/domain-analysis workers. Required. |
 
 Recommended for the one-container Container Apps path:
 
