@@ -187,18 +187,31 @@ def run_analysis(
     ]
     cross_references = accumulated["cross_references"]
 
+    p0 = cost_tracker._entries.get("phase0_planning")
     p1 = cost_tracker._entries.get("phase1_domain_analysis")
     p2a = cost_tracker._entries.get("phase2_cross_reference")
     p2b = cost_tracker._entries.get("phase2_synthesis")
     token_usage = TokenUsage(
+        phase0_model=(p0.model if p0 else ""),
+        phase0_input_tokens=(p0.input_tokens if p0 else 0),
+        phase0_cached_input_tokens=(p0.cached_input_tokens if p0 else 0),
+        phase0_cache_write_tokens=(p0.cache_write_tokens if p0 else 0),
+        phase0_output_tokens=(p0.output_tokens if p0 else 0),
+        phase1_model=(p1.model if p1 else ""),
         phase1_input_tokens=(p1.input_tokens if p1 else 0),
         phase1_cached_input_tokens=(p1.cached_input_tokens if p1 else 0),
+        phase1_cache_write_tokens=(p1.cache_write_tokens if p1 else 0),
         phase1_output_tokens=(p1.output_tokens if p1 else 0),
+        phase2_model=((p2a or p2b).model if (p2a or p2b) else ""),
         phase2_input_tokens=(
             (p2a.input_tokens if p2a else 0) + (p2b.input_tokens if p2b else 0)
         ),
         phase2_cached_input_tokens=(
             (p2a.cached_input_tokens if p2a else 0) + (p2b.cached_input_tokens if p2b else 0)
+        ),
+        phase2_cache_write_tokens=(
+            (p2a.cache_write_tokens if p2a else 0)
+            + (p2b.cache_write_tokens if p2b else 0)
         ),
         phase2_output_tokens=(
             (p2a.output_tokens if p2a else 0) + (p2b.output_tokens if p2b else 0)

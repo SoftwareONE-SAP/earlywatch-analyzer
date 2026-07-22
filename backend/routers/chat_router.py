@@ -28,6 +28,7 @@ from core.runtime_config import (
     CHAT_NODE_CANDIDATE_LIMIT,
     CHAT_NODE_CONTEXT_CHARS,
     CHAT_NODE_TEXT_SCAN_CHARS,
+    get_reasoning_effort,
 )
 
 # Lazy import AzureOpenAI only when needed to avoid cost at module load
@@ -75,6 +76,7 @@ async def chat_with_document(
         api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         model_name = os.getenv("V2_ORCHESTRATOR_MODEL", "gpt-4.1")
+        reasoning_effort = get_reasoning_effort("CHAT_REASONING_EFFORT")
         logger.info("Azure endpoint set: %s, model: %s", bool(azure_endpoint), model_name)
 
         if not api_key or not azure_endpoint:
@@ -173,7 +175,7 @@ async def chat_with_document(
                     model=model_name,
                     input=responses_messages,
                     max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
-                    reasoning={"effort": "medium"},
+                    reasoning={"effort": reasoning_effort},
                     text={"verbosity": "low"},
                 )
             )
