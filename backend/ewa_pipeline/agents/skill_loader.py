@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_SKILL_CONTEXT_CHARS = 8000
+DEFAULT_SKILL_CONTEXT_CHARS = 12000
 
 
 @dataclass(frozen=True)
@@ -173,11 +173,43 @@ class SkillRegistry:
         suggestions: list[str] = []
 
         mapping = {
-            "thresholds-memory": ["memory", "buffer", "heap", "roll", "em "],
-            "thresholds-database": ["database", "hana", "oracle", "sql", "db ", "tablespace"],
+            "thresholds-memory": [
+                "memory",
+                "buffer",
+                "heap",
+                "roll",
+                "extended memory",
+                "em utilization",
+                "em/",
+            ],
+            "thresholds-database": ["database", "oracle", "sql", "db ", "tablespace"],
             "thresholds-performance": ["dialog", "workload", "response", "cpu", "swap", "hardware"],
+            "thresholds-hana": [
+                "hana",
+                "indexserver",
+                "nameserver",
+                "column store",
+                "row store",
+                "delta merge",
+                "savepoint",
+            ],
             "thresholds-batch": ["batch", "background", "job", "sm37"],
-            "thresholds-security": ["security", "sap_all", "password", "rfc", "kernel"],
+            "thresholds-security": [
+                "security",
+                "sap_all",
+                "sap_new",
+                "password",
+                "rfc security",
+                "open rfc",
+                "unauthenticated rfc",
+                "authorization",
+                "audit trail",
+                "audit policy",
+                "data admin",
+                "system user",
+                "listeninterface",
+                "sql trace",
+            ],
             "thresholds-operations": [
                 "spool",
                 "temse",
@@ -191,10 +223,92 @@ class SkillRegistry:
                 "enqueue",
                 "lock",
             ],
-            "remediation-memory": ["memory", "buffer", "heap", "roll", "em "],
-            "remediation-database": ["database", "hana", "oracle", "sql", "db ", "tablespace"],
+            "thresholds-continuity": [
+                "availability",
+                "outage",
+                "restart",
+                "update error",
+                "number range",
+                "backup",
+                "recovery",
+                "recoverability",
+            ],
+            "thresholds-integration": [
+                "rfc load",
+                "rfc gateway",
+                "message server",
+                "netweaver gateway",
+                "odata",
+                "/iwfnd/",
+                "/iwbep/",
+                "interface",
+            ],
+            "thresholds-lifecycle": [
+                "maintenance phase",
+                "support package",
+                "kernel release",
+                "database version",
+                "operating system",
+                "sqldbc",
+                "important sap note",
+            ],
+            "thresholds-data-management": [
+                "data volume",
+                "dvm",
+                "growth",
+                "largest table",
+                "archiv",
+                "reorganization",
+                "compression",
+            ],
+            "thresholds-data-quality": [
+                "service data quality",
+                "service readiness",
+                "missing data",
+                "grey rating",
+                "not rated",
+                "rtcctool",
+                "sdccn",
+                "st-pi",
+                "ccdb",
+            ],
+            "remediation-performance": ["dialog", "workload", "response", "cpu", "swap", "hardware"],
+            "remediation-memory": [
+                "memory",
+                "buffer",
+                "heap",
+                "roll",
+                "extended memory",
+                "em utilization",
+                "em/",
+            ],
+            "remediation-database": ["database", "oracle", "sql", "db ", "tablespace"],
+            "remediation-hana": [
+                "hana",
+                "indexserver",
+                "nameserver",
+                "column store",
+                "row store",
+                "delta merge",
+                "savepoint",
+            ],
             "remediation-batch": ["batch", "background", "job", "sm37"],
-            "remediation-security": ["security", "sap_all", "password", "rfc", "kernel"],
+            "remediation-security": [
+                "security",
+                "sap_all",
+                "sap_new",
+                "password",
+                "rfc security",
+                "open rfc",
+                "unauthenticated rfc",
+                "authorization",
+                "audit trail",
+                "audit policy",
+                "data admin",
+                "system user",
+                "listeninterface",
+                "sql trace",
+            ],
             "remediation-operations": [
                 "spool",
                 "temse",
@@ -208,11 +322,89 @@ class SkillRegistry:
                 "enqueue",
                 "lock",
             ],
+            "remediation-continuity": [
+                "availability",
+                "outage",
+                "restart",
+                "update error",
+                "number range",
+                "backup",
+                "recovery",
+                "recoverability",
+            ],
+            "remediation-integration": [
+                "rfc load",
+                "rfc gateway",
+                "message server",
+                "netweaver gateway",
+                "odata",
+                "/iwfnd/",
+                "/iwbep/",
+                "interface",
+            ],
+            "remediation-lifecycle": [
+                "maintenance phase",
+                "support package",
+                "kernel release",
+                "database version",
+                "operating system",
+                "sqldbc",
+                "important sap note",
+            ],
+            "remediation-data-management": [
+                "data volume",
+                "dvm",
+                "growth",
+                "largest table",
+                "archiv",
+                "reorganization",
+                "compression",
+            ],
+            "remediation-data-quality": [
+                "service data quality",
+                "service readiness",
+                "missing data",
+                "grey rating",
+                "not rated",
+                "rtcctool",
+                "sdccn",
+                "st-pi",
+                "ccdb",
+            ],
             "correlations": ["correlation", "related", "compound", "cascade"],
         }
         for ref_id, keywords in mapping.items():
             if ref_id in available and any(keyword in lowered for keyword in keywords):
                 suggestions.append(ref_id)
+
+        # HANA-specific guidance already covers HANA availability, restart,
+        # backup, and recovery sections. Avoid adding the generic continuity
+        # pair for the same text so fallback loading stays focused.
+        if "thresholds-hana" in suggestions:
+            suggestions = [
+                ref_id
+                for ref_id in suggestions
+                if ref_id not in {"thresholds-continuity", "remediation-continuity"}
+            ]
+
+        # A HANA security subsection should use the focused security pair rather
+        # than also loading the broad HANA operations pair.
+        hana_security_markers = (
+            "audit trail",
+            "audit policy",
+            "data admin",
+            "system user",
+            "listeninterface",
+            "sql trace",
+        )
+        if "thresholds-security" in suggestions and any(
+            marker in lowered for marker in hana_security_markers
+        ):
+            suggestions = [
+                ref_id
+                for ref_id in suggestions
+                if ref_id not in {"thresholds-hana", "remediation-hana"}
+            ]
 
         if "core-analysis" in available:
             suggestions.insert(0, "core-analysis")

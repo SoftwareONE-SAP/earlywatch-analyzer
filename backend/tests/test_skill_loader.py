@@ -77,6 +77,74 @@ class SkillLoaderTests(unittest.TestCase):
         self.assertIn("reference_ids", planner_prompt)
         self.assertIn("Extended memory utilization", domain_prompt)
 
+    def test_suggest_references_covers_new_specialist_domains(self) -> None:
+        registry = self._registry()
+
+        hana = registry.suggest_references(
+            "ewa-analysis",
+            "SAP HANA delta merge, service restarts, and backup recovery",
+        )
+        gateway = registry.suggest_references(
+            "ewa-analysis",
+            "SAP NetWeaver Gateway OData error log and metadata cache",
+        )
+        data_quality = registry.suggest_references(
+            "ewa-analysis",
+            "Service Data Quality is grey because SDCCN data is missing",
+        )
+
+        self.assertEqual("core-analysis", hana[0])
+        self.assertIn("thresholds-hana", hana)
+        self.assertIn("remediation-hana", hana)
+        self.assertNotIn("thresholds-continuity", hana)
+        self.assertNotIn("remediation-continuity", hana)
+        hana_context = registry.resolve_context("ewa-analysis", hana)
+        self.assertNotIn("Skill context truncated by backend limit", hana_context)
+        self.assertIn("thresholds-integration", gateway)
+        self.assertIn("remediation-integration", gateway)
+        self.assertIn("thresholds-data-quality", data_quality)
+        self.assertIn("remediation-data-quality", data_quality)
+
+        hana_security = registry.suggest_references(
+            "ewa-analysis",
+            "SAP HANA Audit Trail and DATA ADMIN system privilege",
+        )
+        self.assertIn("thresholds-security", hana_security)
+        self.assertIn("remediation-security", hana_security)
+        self.assertNotIn("thresholds-hana", hana_security)
+        self.assertNotIn("remediation-hana", hana_security)
+        hana_security_context = registry.resolve_context("ewa-analysis", hana_security)
+        self.assertNotIn("Skill context truncated by backend limit", hana_security_context)
+
+        rfc_load = registry.suggest_references(
+            "ewa-analysis",
+            "RFC Load by Initiating Action",
+        )
+        self.assertIn("thresholds-integration", rfc_load)
+        self.assertNotIn("thresholds-security", rfc_load)
+
+    def test_typical_threshold_and_remediation_context_is_not_truncated(self) -> None:
+        context = self._registry().resolve_context(
+            "ewa-analysis",
+            ["core-analysis", "thresholds-hana", "remediation-hana"],
+        )
+
+        self.assertIn("# Reference: core-analysis", context)
+        self.assertIn("# Reference: remediation-hana", context)
+        self.assertIn("# Reference: thresholds-hana", context)
+        self.assertNotIn("Skill context truncated by backend limit", context)
+
+    def test_new_reference_context_stays_lazy_and_domain_specific(self) -> None:
+        context = self._registry().resolve_context(
+            "ewa-analysis",
+            ["thresholds-data-quality", "remediation-data-quality"],
+        )
+
+        self.assertIn("EWA Service Data Quality Assessment", context)
+        self.assertIn("SDCCN", context)
+        self.assertNotIn("Delta Merge", context)
+        self.assertNotIn("Users with SAP_ALL in production", context)
+
 
 if __name__ == "__main__":
     unittest.main()
