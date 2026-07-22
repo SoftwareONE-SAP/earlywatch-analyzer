@@ -5,11 +5,17 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from langchain_core.messages import HumanMessage
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ewa_pipeline.agents.orchestrator import _tokens  # noqa: E402
 from ewa_pipeline.config import Config  # noqa: E402
-from ewa_pipeline.models import get_orchestrator_model, get_subagent_model  # noqa: E402
+from ewa_pipeline.models import (  # noqa: E402
+    get_cross_ref_model,
+    get_orchestrator_model,
+    get_subagent_model,
+)
 
 
 class ModelConfigurationTests(unittest.TestCase):
@@ -39,6 +45,17 @@ class ModelConfigurationTests(unittest.TestCase):
             "low",
             get_subagent_model(self.config).reasoning_effort,
         )
+
+    def test_reasoning_models_omit_unsupported_temperature_parameter(self) -> None:
+        for model in (
+            get_orchestrator_model(self.config),
+            get_subagent_model(self.config),
+            get_cross_ref_model(self.config),
+        ):
+            payload = model._get_request_payload([HumanMessage(content="test")])
+
+            self.assertIsNone(model.temperature)
+            self.assertNotIn("temperature", payload)
 
     def test_usage_extraction_includes_cache_reads_and_writes(self) -> None:
         raw = SimpleNamespace(
