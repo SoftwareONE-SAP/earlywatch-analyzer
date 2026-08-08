@@ -5,10 +5,10 @@ Topology:
     START → planner → [Send(domain_analyst) × N in parallel]
           → cross_reference → synthesize → END
 
-planner       (gpt-5.4)       Reads the tree, produces a prioritised SectionTask list.
-domain_analyst (gpt-5.4-mini) Runs in parallel — one invocation per section.
-cross_reference (gpt-5.4)     Correlates findings across all sections.
-synthesize     (gpt-5.4)      Writes executive summary + overall health + top-5 actions.
+planner         (orchestrator deployment) Reads the tree and produces SectionTasks.
+domain_analyst  (specialist deployment)   Runs one analysis per selected section.
+cross_reference (orchestrator deployment) Correlates findings across sections.
+synthesize      (orchestrator deployment) Produces the executive summary and priorities.
 """
 
 from __future__ import annotations
@@ -110,6 +110,54 @@ def _derive_health(analyses: list[DomainAnalysis]) -> str:
     return "Healthy"
 
 
+def _normalise_finding_ids(
+    analysis: DomainAnalysis,
+    *,
+    section_id: str | None = None,
+    section_title: str | None = None,
+) -> DomainAnalysis:
+    """Use trusted section metadata and globally unambiguous finding IDs."""
+    trusted_id = str(section_id or analysis.section_id).strip()
+    findings = [
+        finding.model_copy(update={"id": f"{trusted_id}-F{index:03d}"})
+        for index, finding in enumerate(analysis.findings, start=1)
+    ]
+    return analysis.model_copy(
+        update={
+            "section_id": trusted_id,
+            "section_title": section_title or analysis.section_title,
+            "findings": findings,
+        }
+    )
+
+
+def _normalise_section_tasks(
+    tasks: list[dict],
+    sections_available: list[dict],
+) -> list[dict]:
+    """Drop unknown or duplicate planner IDs and trust indexed section titles."""
+    title_lookup = {
+        str(section["id"]): section["title"]
+        for section in sections_available
+    }
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for task in tasks:
+        raw_id = task.get("section_id", "")
+        section_id = str(raw_id).strip().strip("[]'\"").strip()
+        if section_id in seen or section_id not in title_lookup:
+            continue
+        seen.add(section_id)
+        normalized.append(
+            {
+                **task,
+                "section_id": section_id,
+                "section_title": title_lookup[section_id],
+            }
+        )
+    return normalized
+
+
 # ── Graph factory ─────────────────────────────────────────────────────────────
 
 def build_ewa_graph(
@@ -169,8 +217,12 @@ def build_ewa_graph(
         )
 
         plan: OrchestratorPlan = result["parsed"]
+        section_tasks = _normalise_section_tasks(
+            [task.model_dump() for task in plan.tasks],
+            state["sections_available"],
+        )
         return {
-            "section_tasks": [t.model_dump() for t in plan.tasks],
+            "section_tasks": section_tasks,
             "planning_notes": plan.planning_notes,
         }
 
@@ -184,18 +236,19 @@ def build_ewa_graph(
         if not state["section_tasks"]:
             return "cross_reference"
 
-        # Build a title lookup so we trust the tree index, not the planner's echo
-        title_lookup = {s["id"]: s["title"] for s in state["sections_available"]}
+        normalized_tasks = _normalise_section_tasks(
+            state["section_tasks"],
+            state["sections_available"],
+        )
+        if not normalized_tasks:
+            return "cross_reference"
 
         sends = []
-        for task in state["section_tasks"]:
-            # Normalise the id the planner returned: strip any bracket/quote wrapping
-            # (e.g. "[0031]" → "0031") before looking up content.
-            raw_id = task["section_id"]
-            sid = raw_id.strip("[]'\"") if isinstance(raw_id, str) else str(raw_id)
+        for task in normalized_tasks:
+            sid = task["section_id"]
             sends.append(Send("domain_analyst", {
                 "section_id": sid,
-                "section_title": title_lookup.get(sid, task.get("section_title", sid)),
+                "section_title": task["section_title"],
                 "content": state["sections_content"].get(sid, ""),
                 "skill_name": task.get("skill_name") or "ewa-analysis",
                 "reference_ids": task.get("reference_ids") or [],
@@ -245,7 +298,11 @@ def build_ewa_graph(
                 cached_input_tokens=cached_inp,
                 cache_write_tokens=cache_write,
             )
-            da: DomainAnalysis = result["parsed"]
+            da = _normalise_finding_ids(
+                result["parsed"],
+                section_id=task["section_id"],
+                section_title=task["section_title"],
+            )
             return {"domain_analyses": [da]}
         except Exception as exc:
             return {

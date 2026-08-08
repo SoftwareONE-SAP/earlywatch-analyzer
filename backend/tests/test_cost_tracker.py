@@ -99,16 +99,27 @@ class CostTrackerTests(unittest.TestCase):
         usage = tracker.to_dict("sample")
         breakdown = usage["breakdown"][0]
 
-        self.assertEqual(1.0, breakdown["pricing"]["input_per_1m"])
-        self.assertEqual(0.1, breakdown["pricing"]["cached_input_per_1m"])
-        self.assertEqual(1.25, breakdown["pricing"]["cache_write_per_1m"])
-        self.assertEqual(6.0, breakdown["pricing"]["output_per_1m"])
+        self.assertEqual(0.2, breakdown["pricing"]["input_per_1m"])
+        self.assertEqual(0.02, breakdown["pricing"]["cached_input_per_1m"])
+        self.assertEqual(0.25, breakdown["pricing"]["cache_write_per_1m"])
+        self.assertEqual(1.2, breakdown["pricing"]["output_per_1m"])
         self.assertEqual(700_000, breakdown["billable_input_tokens"])
-        self.assertAlmostEqual(0.7, breakdown["input_cost_usd"])
-        self.assertAlmostEqual(0.02, breakdown["cached_input_cost_usd"])
-        self.assertAlmostEqual(0.125, breakdown["cache_write_cost_usd"])
-        self.assertAlmostEqual(0.6, breakdown["output_cost_usd"])
-        self.assertAlmostEqual(1.445, breakdown["total_cost_usd"])
+        self.assertAlmostEqual(0.14, breakdown["input_cost_usd"])
+        self.assertAlmostEqual(0.004, breakdown["cached_input_cost_usd"])
+        self.assertAlmostEqual(0.025, breakdown["cache_write_cost_usd"])
+        self.assertAlmostEqual(0.12, breakdown["output_cost_usd"])
+        self.assertAlmostEqual(0.289, breakdown["total_cost_usd"])
+
+    def test_gpt_5_6_terra_uses_current_family_pricing(self) -> None:
+        tracker = CostTracker(pricing={})
+        tracker.record("phase", "gpt-5.6-terra", 1_000_000, 1_000_000)
+
+        pricing = tracker.to_dict()["breakdown"][0]["pricing"]
+
+        self.assertEqual(2.0, pricing["input_per_1m"])
+        self.assertEqual(0.2, pricing["cached_input_per_1m"])
+        self.assertEqual(2.5, pricing["cache_write_per_1m"])
+        self.assertEqual(12.0, pricing["output_per_1m"])
 
     def test_exact_deployment_pricing_overrides_family_fallback(self) -> None:
         tracker = CostTracker(

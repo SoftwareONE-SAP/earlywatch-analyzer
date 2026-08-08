@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_SKILL_CONTEXT_CHARS = 12000
+# The largest focused pair (core + security threshold + security remediation)
+# is just over 12K characters. Keep enough headroom to avoid cutting off safety
+# guidance while remaining far below GPT-5.6 Luna's context capacity.
+DEFAULT_SKILL_CONTEXT_CHARS = 16000
 
 
 @dataclass(frozen=True)

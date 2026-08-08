@@ -167,7 +167,7 @@ az containerapp update --name $app --resource-group $rg --set-env-vars `
   V2_ROUTER_MODEL=<your-router-deployment> `
   CHAT_REASONING_EFFORT=medium `
   ORCHESTRATOR_REASONING_EFFORT=medium `
-  DEEP_REASONING_EFFORT=medium `
+  DEEP_REASONING_EFFORT=high `
   AUTH_ENABLED=true `
   TRUST_PLATFORM_AUTH_HEADERS=true
 ```

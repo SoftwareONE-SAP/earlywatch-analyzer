@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 OPENAI_FALLBACK_PRICING: dict[str, dict[str, float]] = {
-    # Official OpenAI standard API pricing per 1M text tokens, checked 2026-07-22.
+    # Official OpenAI standard API pricing per 1M text tokens, checked 2026-08-08.
     # Azure pricing may differ; config.yaml can override by model or deployment name.
     "gpt-5.6-sol": {
         "input_per_1m": 5.00,
@@ -17,16 +17,16 @@ OPENAI_FALLBACK_PRICING: dict[str, dict[str, float]] = {
         "output_per_1m": 30.00,
     },
     "gpt-5.6-terra": {
-        "input_per_1m": 2.50,
-        "cached_input_per_1m": 0.25,
-        "cache_write_per_1m": 3.125,
-        "output_per_1m": 15.00,
+        "input_per_1m": 2.00,
+        "cached_input_per_1m": 0.20,
+        "cache_write_per_1m": 2.50,
+        "output_per_1m": 12.00,
     },
     "gpt-5.6-luna": {
-        "input_per_1m": 1.00,
-        "cached_input_per_1m": 0.10,
-        "cache_write_per_1m": 1.25,
-        "output_per_1m": 6.00,
+        "input_per_1m": 0.20,
+        "cached_input_per_1m": 0.02,
+        "cache_write_per_1m": 0.25,
+        "output_per_1m": 1.20,
     },
     # The unqualified alias routes to Sol.
     "gpt-5.6": {
