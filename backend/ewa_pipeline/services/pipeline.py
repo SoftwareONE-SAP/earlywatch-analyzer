@@ -192,7 +192,6 @@ def _prepare_doc_input(
         html_path = convert_doc_to_html(
             doc_path,
             data_dir / f"{doc_path.stem}_html",
-            prefer_word_com=False,
         )
         convert_html_to_compact_html(html_path, compact_path)
     reporter.emit("normalizing_document", "completed", "Compact HTML ready", detail=compact_path.name)

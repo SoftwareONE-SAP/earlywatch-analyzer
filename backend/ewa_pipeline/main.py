@@ -151,7 +151,7 @@ def index(doc_path: str, config_path: str):
     compact_path = data_dir / f"{doc_file.stem}.html"
 
     console.print(f"[cyan]Converting[/cyan]: {doc_file.name} -> compact HTML...")
-    html_path = convert_doc_to_html(doc_file, data_dir / f"{doc_file.stem}_html", prefer_word_com=False)
+    html_path = convert_doc_to_html(doc_file, data_dir / f"{doc_file.stem}_html")
     convert_html_to_compact_html(html_path, compact_path)
 
     console.print("[cyan]Indexing[/cyan]: building HTML document structure...")
