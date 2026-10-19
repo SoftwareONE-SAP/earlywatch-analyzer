@@ -168,7 +168,9 @@ class EWAWorkflowOrchestrator:
 
             return {
                 "success": True,
-                "message": "Analysis completed successfully.",
+                "message": ("Analysis completed with incomplete source coverage or downstream analysis; review the workbook."
+                            if result["analysis_result"].degraded else "Analysis completed successfully."),
+                "degraded": result["analysis_result"].degraded,
                 "workbook_file": artifact_names.get("workbook"),
                 "workbook_payload_file": artifact_names.get("payload"),
                 "usage_file": artifact_names.get("usage"),

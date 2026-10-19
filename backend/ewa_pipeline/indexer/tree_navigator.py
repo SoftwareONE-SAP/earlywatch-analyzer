@@ -1,6 +1,9 @@
 ﻿from dataclasses import dataclass, field
 
 
+from bs4 import BeautifulSoup
+
+
 _SKIP_TITLES = {
     "table of contents", "toc", "contents", "cover page", "cover",
     "title page", "front matter", "index", "appendix",
@@ -60,6 +63,14 @@ def _flatten_recursive(node: TreeNode) -> list[TreeNode]:
     return result
 
 
+def _has_body_text(node: TreeNode) -> bool:
+    if not node.content:
+        return node.page_start > 0 and node.page_end >= node.page_start
+    text = BeautifulSoup(node.content, "html.parser").get_text(" ", strip=True)
+    normalized = " ".join(text.split())
+    return bool(normalized and normalized != " ".join(node.title.split()))
+
+
 def get_analyzable_sections(tree: dict) -> list[TreeNode]:
     """Return all nodes (depth-first) excluding TOC/cover pages."""
     top_nodes = flatten_tree(tree)
@@ -76,6 +87,8 @@ def get_analyzable_sections(tree: dict) -> list[TreeNode]:
         if not node.title.strip():
             continue
         if node.title.lower().strip() in _SKIP_TITLES:
+            continue
+        if not _has_body_text(node):
             continue
         result.append(node)
     return result

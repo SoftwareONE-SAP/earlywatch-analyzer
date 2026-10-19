@@ -4,7 +4,7 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 
 class SectionPlanItem(BaseModel):
-    section_id: str
+    section_ids: list[str]
     section_title: str
     analysis_focus: str
     skill_name: str | None = None
@@ -44,6 +44,31 @@ class DomainAnalysis(BaseModel):
     overall_health: Literal["Critical", "Warning", "Healthy"]
 
 
+class GroupedDomainAnalysis(BaseModel):
+    """One shared-context request with a separately attributed result per source."""
+
+    analyses: list[DomainAnalysis]
+
+
+class AnalysisTaskRecord(BaseModel):
+    task_id: str
+    title: str
+    source_section_ids: list[str]
+    context_section_ids: list[str] = Field(default_factory=list)
+    source_content_chars: int
+    context_content_chars: int = 0
+    origin: str
+    within_budget: bool = True
+
+
+class SectionCoverage(BaseModel):
+    section_id: str
+    section_title: str
+    analysis_task_id: str = ""
+    status: Literal["analyzed", "failed", "skipped"]
+    reason: str = ""
+
+
 class CrossReference(BaseModel):
     title: str
     related_findings: list[str]
@@ -67,6 +92,10 @@ class AnalysisResult(BaseModel):
     domain_analyses: list[DomainAnalysis]
     cross_references: list[CrossReference]
     executive_summary: str
-    overall_system_health: Literal["Critical", "Warning", "Healthy"]
+    overall_system_health: Literal["Critical", "Warning", "Healthy", "Unknown"]
     top_5_priority_actions: list[str]
     token_usage: TokenUsage
+    analysis_tasks: list[AnalysisTaskRecord] = Field(default_factory=list)
+    coverage: list[SectionCoverage] = Field(default_factory=list)
+    degraded: bool = False
+    warnings: list[str] = Field(default_factory=list)

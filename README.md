@@ -160,12 +160,45 @@ All configuration is via environment variables — see `.env.example` for the fu
 | `AZURE_STORAGE_CONTAINER_NAME` | Blob container for uploads and outputs. |
 | `PROVIDER` | `openai` or `anthropic`. |
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_API_VERSION` | Model endpoint and credentials. |
-| `V2_ORCHESTRATOR_MODEL` | Deployment for planner, cross-reference, and synthesis (most capable). |
+| `V2_ORCHESTRATOR_MODEL` | Planner deployment; default for cross-reference and synthesis. |
 | `V2_SPECIALIST_MODEL` | Deployment for the parallel domain analysts (faster / cheaper). |
 | `V2_ROUTER_MODEL` | Deployment for routing, page indexing, and chat retrieval (fastest). |
 | `CHAT_REASONING_EFFORT` | Required reasoning effort for document chat. |
-| `ORCHESTRATOR_REASONING_EFFORT` | Required reasoning effort for planner, cross-reference, and synthesis. |
+| `ORCHESTRATOR_REASONING_EFFORT` | Required planner reasoning effort; default for downstream roles. |
 | `DEEP_REASONING_EFFORT` | Required reasoning effort for specialist/domain-analysis workers. |
+| `ORCHESTRATOR_MODEL`, `SPECIALIST_MODEL` | Optional CLI-compatible overrides for the corresponding V2 deployments. |
+| `SPECIALIST_REASONING_EFFORT` | Optional override for `DEEP_REASONING_EFFORT`. |
+| `CROSS_REFERENCE_MODEL`, `SYNTHESIS_MODEL` | Independent downstream deployments; blank inherits planner. |
+| `CROSS_REFERENCE_REASONING_EFFORT`, `SYNTHESIS_REASONING_EFFORT` | Independent downstream reasoning efforts; blank inherits planner. |
+| `REQUEST_TIMEOUT_SECONDS` | Timeout per model request, default 180 seconds. |
+| `PLANNING_TIMEOUT_SECONDS` | Optional planner-only timeout; blank inherits the request timeout. |
+| `MAX_CONCURRENCY` | Maximum parallel section-analysis tasks per report, default 4. |
+| `MAX_TASK_SECTIONS` | Maximum source sections per grouped task, default 12. |
+| `MAX_TASK_CONTENT_CHARS` | Maximum complete source HTML characters per task, default 48000. |
+| `MAX_PARENT_CONTEXT_CHARS` | Maximum supplementary parent-context characters per task, default 4000; 0 disables excerpts. |
+
+The model clients retry failed requests up to three times by default. A YAML
+configuration can set `max_model_retries`, the timeouts, and `max_concurrency`;
+explicit YAML runtime values take precedence over environment values. Reasoning
+levels must be supported by the selected Azure deployment.
+
+Azure Portal environment variables remain the normal deployment controls. In the
+Container App, open **Revisions and replicas > Create new revision**, edit the
+application container's **Environment variables**, and create the new revision.
+Use **Manual** as the source for these non-secret analysis settings. Runtime values are read at process
+startup; changing a Portal value does not require rebuilding the image. The
+container image does not include a `config.yaml` that could override these values.
+
+The planner groups related source sections into bounded specialist requests.
+Python validates unique ownership, splits groups by source count/content limits,
+and backfills omitted sources by hierarchy. Each response must identify every
+owned source separately. Oversized individual sources fail explicitly without
+truncation or model calls. Usage is charged once per grouped request. Workbooks
+retain per-source findings and include Analysis Tasks and Source Coverage sheets;
+partial section coverage is marked Unknown and zero successful sections fail.
+
+See [the October 19 grouping deployment record](deployment/cli-grouping-20261019.md)
+for the current values, verification, and source/image provenance.
 | `AUTH_ENABLED` / `TRUST_PLATFORM_AUTH_HEADERS` | Entra authentication behaviour in hosted environments. |
 
 > **Never commit real keys or connection strings.** Store secrets in Azure Container App settings, Key Vault, or a CI/CD secret store.

@@ -6,9 +6,9 @@ Topology:
           → cross_reference → synthesize → END
 
 planner         (orchestrator deployment) Reads the tree and produces SectionTasks.
-domain_analyst  (specialist deployment)   Runs one analysis per selected section.
-cross_reference (orchestrator deployment) Correlates findings across sections.
-synthesize      (orchestrator deployment) Produces the executive summary and priorities.
+domain_analyst  (specialist deployment)   Reviews one bounded group per invocation.
+cross_reference (cross-reference deployment) Correlates findings across sections.
+synthesize      (synthesis deployment) Produces the executive summary and priorities.
 """
 
 from __future__ import annotations
@@ -22,16 +22,21 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
 from ewa_pipeline.config import Config
-from ewa_pipeline.models import get_orchestrator_model, get_subagent_model, get_cross_ref_model
+from ewa_pipeline.models import (
+    get_orchestrator_model, get_subagent_model, get_cross_ref_model, get_synthesis_model,
+)
 from ewa_pipeline.tracking.cost_tracker import CostTracker
 from ewa_pipeline.report.schemas import (
-    DomainAnalysis, CrossReferenceList, OrchestratorPlan, SynthesisResult,
+    AnalysisTaskRecord, DomainAnalysis, GroupedDomainAnalysis,
+    CrossReferenceList, OrchestratorPlan, SynthesisResult,
 )
 from .skill_loader import SkillRegistry
+from .planning import validate_plan, parent_context, planning_catalogue
 from .prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     ORCHESTRATOR_PLANNING_PROMPT,
     DOMAIN_ANALYST_PROMPT,
+    GROUPED_DOMAIN_ANALYST_PROMPT,
     CROSS_REFERENCE_PROMPT,
 )
 
@@ -41,25 +46,29 @@ from .prompts import (
 class EwaAnalysisState(TypedDict):
     # Inputs — set once before the graph runs
     tree_summary: str
-    sections_available: list[dict]       # [{id, title, summary}] — for planner
+    sections_available: list[dict]       # source IDs, hierarchy, summaries, sizes
     sections_content: dict[str, str]     # section_id to source content
+    context_sections: dict[str, str]
     skills_catalog: str
 
     # After planner node
-    section_tasks: list[dict]            # [{section_id, section_title, analysis_focus}]
+    section_tasks: list[dict]            # grouped source IDs, budgets, context
     planning_notes: str
+    analysis_tasks: list[AnalysisTaskRecord]
 
     # Accumulated from parallel domain_analyst nodes
     domain_analyses: Annotated[list[DomainAnalysis], operator.add]
-    failed_sections: Annotated[list[str], operator.add]
+    failed_sections: Annotated[list[dict], operator.add]
 
     # After cross_reference node
     cross_references: list
+    correlation_failed: bool
 
     # After synthesize node
     executive_summary: str
     overall_system_health: str
     top_5_priority_actions: list[str]
+    synthesis_failed: bool
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,148 +182,128 @@ def build_ewa_graph(
     """
     specialist_deployment = config.azure_openai.deployments.specialist
     orchestrator_deployment = config.azure_openai.deployments.orchestrator
+    cross_reference_deployment, _ = config.model_settings("cross_reference")
+    synthesis_deployment, _ = config.model_settings("synthesis")
 
     planner_chain = get_orchestrator_model(config).with_structured_output(
         OrchestratorPlan, include_raw=True
     )
-    domain_chain = get_subagent_model(config).with_structured_output(
+    specialist_model = get_subagent_model(config)
+    domain_chain = specialist_model.with_structured_output(
         DomainAnalysis, include_raw=True
+    )
+    grouped_chain = specialist_model.with_structured_output(
+        GroupedDomainAnalysis, include_raw=True
     )
     xref_chain = get_cross_ref_model(config).with_structured_output(
         CrossReferenceList, include_raw=True
     )
-    synth_chain = get_orchestrator_model(config).with_structured_output(
+    synth_chain = get_synthesis_model(config).with_structured_output(
         SynthesisResult, include_raw=True
     )
 
     # ── Node: planner ────────────────────────────────────────────────────────
 
     def planner(state: EwaAnalysisState) -> dict:
-        """
-        Orchestrator LLM reads the tree and produces a prioritised SectionTask list.
-        Each task carries an analysis_focus hint that guides the domain analyst.
-        """
-        sections_text = "\n".join(
-            f"  id={s['id']} | {s['title']}: {s.get('summary', '')[:120]}"
-            for s in state["sections_available"]
-        )
         prompt = ORCHESTRATOR_PLANNING_PROMPT.format(
-            tree_summary=state["tree_summary"],
-            sections=sections_text,
+            sections=json.dumps(planning_catalogue(state["sections_available"], state["context_sections"])),
             skills_catalog=state["skills_catalog"],
+            max_task_sections=config.max_task_sections,
+            max_task_content_chars=config.max_task_content_chars,
         )
-        result = planner_chain.invoke(
-            [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-        )
-        inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
-        cost_tracker.record(
-            "phase0_planning",
-            orchestrator_deployment,
-            inp,
-            out,
-            cached_input_tokens=cached_inp,
-            cache_write_tokens=cache_write,
-        )
-
-        plan: OrchestratorPlan = result["parsed"]
-        section_tasks = _normalise_section_tasks(
-            [task.model_dump() for task in plan.tasks],
-            state["sections_available"],
-        )
-        return {
-            "section_tasks": section_tasks,
-            "planning_notes": plan.planning_notes,
-        }
-
-    # ── Conditional edge: fan out sections to parallel domain analysts ────────
+        plan = None
+        try:
+            result = planner_chain.invoke(
+                [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+            )
+            inp, out, cached, cache_write = _tokens(result.get("raw"))
+            cost_tracker.record("phase0_planning", orchestrator_deployment, inp, out,
+                                cached_input_tokens=cached, cache_write_tokens=cache_write)
+            if isinstance(result.get("parsed"), OrchestratorPlan):
+                plan = result["parsed"]
+        except Exception:
+            # Hierarchy fallback still owns every eligible section exactly once.
+            pass
+        tasks, _, notes = validate_plan(plan, state["sections_available"], config)
+        records = []
+        for task in tasks:
+            context, context_ids = parent_context(task["section_ids"], state["sections_available"],
+                state["context_sections"], config.max_parent_context_chars)
+            task["parent_context"] = context
+            records.append(AnalysisTaskRecord(task_id=task["task_id"], title=task["section_title"],
+                source_section_ids=task["section_ids"], context_section_ids=context_ids,
+                source_content_chars=task["source_content_chars"], context_content_chars=len(context),
+                origin=task["task_origin"], within_budget=not task["oversized"]))
+        return {"section_tasks": tasks, "analysis_tasks": records,
+                "planning_notes": " ".join([plan.planning_notes if plan else "", *notes]).strip()}
 
     def route_sections(state: EwaAnalysisState) -> list[Send] | str:
-        """
-        Dispatch each section task as a parallel Send to domain_analyst.
-        Falls through to cross_reference directly if the planner produced no tasks.
-        """
         if not state["section_tasks"]:
             return "cross_reference"
-
-        normalized_tasks = _normalise_section_tasks(
-            state["section_tasks"],
-            state["sections_available"],
-        )
-        if not normalized_tasks:
-            return "cross_reference"
-
-        sends = []
-        for task in normalized_tasks:
-            sid = task["section_id"]
-            sends.append(Send("domain_analyst", {
-                "section_id": sid,
-                "section_title": task["section_title"],
-                "content": state["sections_content"].get(sid, ""),
-                "skill_name": task.get("skill_name") or "ewa-analysis",
-                "reference_ids": task.get("reference_ids") or [],
-                "analysis_focus": task.get("analysis_focus", ""),
-            }))
-        return sends
-
-    # ── Node: domain_analyst ─────────────────────────────────────────────────
+        lookup = {s["id"]: s for s in state["sections_available"]}
+        return [Send("domain_analyst", {**task, "sources": [
+            {"id": sid, "title": lookup[sid]["title"], "content": state["sections_content"][sid]}
+            for sid in task["section_ids"]]}) for task in state["section_tasks"]]
 
     def domain_analyst(task: dict) -> dict:
-        """
-        Analyse a single section. Runs in parallel — one invocation per Send.
-        Returns {"domain_analyses": [da]} which is accumulated via operator.add.
-        """
-        reference_ids = task.get("reference_ids") or []
-        if not reference_ids:
-            reference_ids = skill_registry.suggest_references(
-                task.get("skill_name") or "ewa-analysis",
-                " ".join(
-                    [
-                        task.get("section_title", ""),
-                        task.get("analysis_focus", ""),
-                        task.get("content", "")[:1200],
-                    ]
-                ),
-            )
-        skill_context = skill_registry.resolve_context(
-            task.get("skill_name") or "ewa-analysis",
-            reference_ids,
-            fallback_text="No specific skill context was selected for this section.",
-        )
-        prompt = DOMAIN_ANALYST_PROMPT.format(
-            section_title=task["section_title"],
-            section_id=task["section_id"],
-            content=task["content"],
-            skill_context=skill_context,
-            analysis_focus=task["analysis_focus"],
-        )
-        try:
-            result = domain_chain.invoke([HumanMessage(content=prompt)])
-            inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
-            cost_tracker.record(
-                "phase1_domain_analysis",
-                specialist_deployment,
-                inp,
-                out,
-                cached_input_tokens=cached_inp,
-                cache_write_tokens=cache_write,
-            )
-            da = _normalise_finding_ids(
-                result["parsed"],
-                section_id=task["section_id"],
-                section_title=task["section_title"],
-            )
-            return {"domain_analyses": [da]}
-        except Exception as exc:
-            return {
-                "domain_analyses": [],
-                "failed_sections": [
-                    f"{task['section_id']} ({task['section_title']}): {exc}"
-                ],
-            }
-
-    # ── Node: cross_reference ────────────────────────────────────────────────
+        """One bounded invocation; preserve each source's identity and full content."""
+        sources = task["sources"]
+        references = task.get("reference_ids") or skill_registry.suggest_references(
+            task["skill_name"], " ".join([task["section_title"], task["analysis_focus"],
+                *[s["title"] + " " + s["content"][:100] for s in sources]]))
+        context = skill_registry.resolve_context(task["skill_name"], references,
+            fallback_text="No specific skill context was selected for this group.")
+        reason, parsed = "", None
+        if task["oversized"]:
+            reason = "Individual source exceeds configured task budget; no content truncated or model call made."
+        else:
+            if len(sources) == 1:
+                source = sources[0]
+                prompt = DOMAIN_ANALYST_PROMPT.format(section_title=source["title"], section_id=source["id"],
+                    content=source["content"], skill_context=context, analysis_focus=task["analysis_focus"])
+                chain = domain_chain
+            else:
+                source_text = "\n\n".join(
+                    f"Source Section ID: {s['id']}\nSource title: {s['title']}\n{s['content']}" for s in sources)
+                prompt = GROUPED_DOMAIN_ANALYST_PROMPT.format(section_title=task["section_title"],
+                    section_ids=", ".join(task["section_ids"]), content=source_text,
+                    skill_context=context, analysis_focus=task["analysis_focus"])
+                chain = grouped_chain
+            if task["parent_context"]:
+                prompt += "\n\nSupplementary parent context (excerpts; not owned source sections):\n" + task["parent_context"]
+            try:
+                result = chain.invoke([HumanMessage(content=prompt)])
+                inp, out, cached, cache_write = _tokens(result.get("raw"))
+                # Charge once per request, even when it owns multiple sections.
+                cost_tracker.record("phase1_domain_analysis", specialist_deployment, inp, out,
+                                    cached_input_tokens=cached, cache_write_tokens=cache_write)
+                parsed = result.get("parsed")
+            except Exception:
+                reason = "Model call failed; source content and provider details omitted."
+        if isinstance(parsed, GroupedDomainAnalysis) and len(sources) > 1:
+            returned = parsed.analyses
+        elif isinstance(parsed, DomainAnalysis) and len(sources) == 1:
+            returned = [parsed]
+        else:
+            returned = []
+            reason = reason or "Model returned no parsable analysis."
+        ids = [str(analysis.section_id).strip("[]'\" ") for analysis in returned]
+        if any(sid not in task["section_ids"] for sid in ids) or len(ids) != len(set(ids)):
+            reason = "Model returned unexpected or duplicate source identities."
+        by_id = dict(zip(ids, returned))
+        analyses, failures = [], []
+        for source in sources:
+            sid = source["id"]
+            if reason or sid not in by_id:
+                failures.append({"section_id": sid, "section_title": source["title"],
+                                 "reason": reason or "Group response omitted this source section."})
+            else:
+                analyses.append(_normalise_finding_ids(by_id[sid], section_id=sid, section_title=source["title"]))
+        return {"domain_analyses": analyses, "failed_sections": failures}
 
     def cross_reference(state: EwaAnalysisState) -> dict:
+        if not state["domain_analyses"]:
+            return {"cross_references": [], "correlation_failed": True}
         all_findings = {
             da.section_id: da.model_dump()
             for da in state["domain_analyses"]
@@ -327,20 +316,28 @@ def build_ewa_graph(
             inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
             cost_tracker.record(
                 "phase2_cross_reference",
-                orchestrator_deployment,
+                cross_reference_deployment,
                 inp,
                 out,
                 cached_input_tokens=cached_inp,
                 cache_write_tokens=cache_write,
             )
-            xref_list: CrossReferenceList = result["parsed"]
-            return {"cross_references": xref_list.items}
+            xref_list = result.get("parsed")
+            if not isinstance(xref_list, CrossReferenceList):
+                raise ValueError("Cross-reference response could not be parsed")
+            valid_ids = {finding.id for analysis in state["domain_analyses"] for finding in analysis.findings}
+            valid = [item for item in xref_list.items
+                     if item.related_findings and all(rid in valid_ids for rid in item.related_findings)]
+            return {"cross_references": valid, "correlation_failed": len(valid) != len(xref_list.items)}
         except Exception:
-            return {"cross_references": []}
+            return {"cross_references": [], "correlation_failed": True}
 
     # ── Node: synthesize ─────────────────────────────────────────────────────
 
     def synthesize(state: EwaAnalysisState) -> dict:
+        if not state["domain_analyses"]:
+            return {"executive_summary": "No section analysis succeeded.", "overall_system_health": "Unknown",
+                    "top_5_priority_actions": [], "synthesis_failed": True}
         all_findings_text = json.dumps(
             [da.model_dump() for da in state["domain_analyses"]], indent=2
         )
@@ -373,7 +370,7 @@ Write the final synthesis:
             inp, out, cached_inp, cache_write = _tokens(result.get("raw"))
             cost_tracker.record(
                 "phase2_synthesis",
-                orchestrator_deployment,
+                synthesis_deployment,
                 inp,
                 out,
                 cached_input_tokens=cached_inp,
@@ -388,8 +385,9 @@ Write the final synthesis:
         except Exception:
             return {
                 "executive_summary": "Synthesis unavailable.",
-                "overall_system_health": _derive_health(state["domain_analyses"]),
+                "overall_system_health": "Unknown",
                 "top_5_priority_actions": [],
+                "synthesis_failed": True,
             }
 
     # ── Compile ───────────────────────────────────────────────────────────────

@@ -446,7 +446,8 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = set()
+    used: set[str] = {"Executive Summary", "Cross-References", "Remediation Plan", "Document Structure",
+                      "Token Usage", "Analysis Tasks", "Source Coverage"}
     for da in result.domain_analyses:
         if not da.findings:
             continue
@@ -468,6 +469,34 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     if tree:
         _build_document_structure(wb, tree)
     _build_token_usage(wb, result.token_usage)
+    if result.analysis_tasks:
+        ws = wb.create_sheet("Analysis Tasks")
+        _apply_app_style(ws)
+        _hdr_row(ws, 1, ["Task ID", "Title", "Owned Source IDs", "Context IDs", "Source Characters",
+                         "Context Characters", "Origin", "Within Budget"])
+        for row, task in enumerate(result.analysis_tasks, 2):
+            values = [task.task_id, task.title, ", ".join(task.source_section_ids),
+                      ", ".join(task.context_section_ids), task.source_content_chars,
+                      task.context_content_chars, task.origin, "Yes" if task.within_budget else "No"]
+            for col, value in enumerate(values, 1):
+                cell = ws.cell(row, col, value)
+                if isinstance(value, str):
+                    cell.data_type = "s"
+                cell.alignment = _align(wrap=True)
+        ws.freeze_panes = "A2"
+        _autofit_columns(ws, min_width=10, max_width=55)
+    if result.coverage:
+        ws = wb.create_sheet("Source Coverage")
+        _apply_app_style(ws)
+        _hdr_row(ws, 1, ["Source ID", "Title", "Task ID", "Status", "Reason"])
+        for row, source in enumerate(result.coverage, 2):
+            for col, value in enumerate([source.section_id, source.section_title, source.analysis_task_id,
+                                         source.status, source.reason], 1):
+                cell = ws.cell(row, col, value)
+                cell.data_type = "s"
+                cell.alignment = _align(wrap=True)
+        ws.freeze_panes = "A2"
+        _autofit_columns(ws, min_width=10, max_width=55)
 
     # Open on the dashboard
     wb.active = 0

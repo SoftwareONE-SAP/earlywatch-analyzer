@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 import yaml
 
 
@@ -9,6 +9,15 @@ class DeploymentsConfig(BaseModel):
     orchestrator: str
     specialist: str
     router: str
+    cross_reference: str | None = None
+    synthesis: str | None = None
+
+    @field_validator("cross_reference", "synthesis", mode="before")
+    @classmethod
+    def _optional_deployment(cls, value):
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
 
 class AzureConfig(BaseModel):
@@ -18,9 +27,21 @@ class AzureConfig(BaseModel):
     deployments: DeploymentsConfig
 
 
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
 class ReasoningConfig(BaseModel):
-    orchestrator: Literal["none", "low", "medium", "high", "xhigh", "max"]
-    deep: Literal["none", "low", "medium", "high", "xhigh", "max"]
+    orchestrator: ReasoningEffort
+    deep: ReasoningEffort
+    cross_reference: ReasoningEffort | None = None
+    synthesis: ReasoningEffort | None = None
+
+    @field_validator("orchestrator", "deep", "cross_reference", "synthesis", mode="before")
+    @classmethod
+    def _normalise_effort(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower() or None
+        return value
 
 
 class ModelPrice(BaseModel):
@@ -34,6 +55,18 @@ class Config(BaseModel):
     azure_openai: AzureConfig
     reasoning: ReasoningConfig
     pricing: dict[str, ModelPrice] = {}
+    request_timeout_seconds: int = Field(default=180, ge=1)
+    planning_timeout_seconds: int | None = Field(default=None, ge=1)
+    max_model_retries: int = Field(default=3, ge=0)
+    max_concurrency: int = Field(default=4, ge=1)
+    max_task_sections: int = Field(default=12, ge=1)
+    max_task_content_chars: int = Field(default=48000, ge=1)
+    max_parent_context_chars: int = Field(default=4000, ge=0)
+
+    def model_settings(self, role: Literal["cross_reference", "synthesis"]) -> tuple[str, ReasoningEffort]:
+        deployment = getattr(self.azure_openai.deployments, role)
+        effort = getattr(self.reasoning, role)
+        return deployment or self.azure_openai.deployments.orchestrator, effort or self.reasoning.orchestrator
 
     def pricing_dict(self) -> dict[str, dict[str, float]]:
         """Return pricing in the flat format CostTracker expects."""
@@ -59,10 +92,12 @@ def _first_env(*names: str) -> str:
     return ""
 
 
-def _reasoning_env() -> dict[str, str]:
+def _reasoning_env() -> dict[str, str | None]:
     values = {
         "orchestrator": _first_env("ORCHESTRATOR_REASONING_EFFORT"),
-        "deep": _first_env("DEEP_REASONING_EFFORT"),
+        "deep": _first_env("SPECIALIST_REASONING_EFFORT", "DEEP_REASONING_EFFORT"),
+        "cross_reference": _first_env("CROSS_REFERENCE_REASONING_EFFORT") or None,
+        "synthesis": _first_env("SYNTHESIS_REASONING_EFFORT") or None,
     }
     missing = [
         env_name
@@ -79,13 +114,22 @@ def _reasoning_env() -> dict[str, str]:
     return values
 
 
+def _runtime_env() -> dict[str, str]:
+    return {
+        name.lower(): value
+        for name in ("REQUEST_TIMEOUT_SECONDS", "PLANNING_TIMEOUT_SECONDS", "MAX_CONCURRENCY",
+                     "MAX_TASK_SECTIONS", "MAX_TASK_CONTENT_CHARS", "MAX_PARENT_CONTEXT_CHARS")
+        if (value := _first_env(name))
+    }
+
+
 def _build_env_config() -> Config:
     endpoint = _first_env("AZURE_OPENAI_ENDPOINT")
     api_key = _first_env("AZURE_OPENAI_API_KEY")
     api_version = _first_env("AZURE_OPENAI_API_VERSION") or "2025-03-01-preview"
 
-    orchestrator_deployment = _first_env("V2_ORCHESTRATOR_MODEL")
-    specialist_deployment = _first_env("V2_SPECIALIST_MODEL")
+    orchestrator_deployment = _first_env("ORCHESTRATOR_MODEL", "V2_ORCHESTRATOR_MODEL")
+    specialist_deployment = _first_env("SPECIALIST_MODEL", "V2_SPECIALIST_MODEL")
     router_deployment = _first_env("V2_ROUTER_MODEL")
     reasoning = _reasoning_env()
 
@@ -117,10 +161,13 @@ def _build_env_config() -> Config:
                     "orchestrator": orchestrator_deployment,
                     "specialist": specialist_deployment,
                     "router": router_deployment,
+                    "cross_reference": _first_env("CROSS_REFERENCE_MODEL") or None,
+                    "synthesis": _first_env("SYNTHESIS_MODEL") or None,
                 },
             },
             "reasoning": reasoning,
             "pricing": {},
+            **_runtime_env(),
         }
     )
 
@@ -140,6 +187,10 @@ def load_config(path: Path | None = None) -> Config:
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         data["reasoning"] = _reasoning_env()
+        deployments = data["azure_openai"]["deployments"]
+        deployments.setdefault("cross_reference", _first_env("CROSS_REFERENCE_MODEL") or None)
+        deployments.setdefault("synthesis", _first_env("SYNTHESIS_MODEL") or None)
+        data = {**_runtime_env(), **data}
         return Config.model_validate(data)
 
     return _build_env_config()

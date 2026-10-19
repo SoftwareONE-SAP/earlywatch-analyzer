@@ -66,6 +66,8 @@ class SkillLoaderTests(unittest.TestCase):
             tree_summary="id=001 Memory Overview",
             sections="id=001 | SAP Memory: summary",
             skills_catalog=catalog,
+            max_task_sections=12,
+            max_task_content_chars=48000,
         )
         domain_prompt = DOMAIN_ANALYST_PROMPT.format(
             section_title="SAP Memory",
@@ -87,9 +89,9 @@ class SkillLoaderTests(unittest.TestCase):
         self.assertIn("zero to eight", CROSS_REFERENCE_PROMPT)
         self.assertNotIn("Minimum 1", CROSS_REFERENCE_PROMPT)
 
-    def test_planner_avoids_redundant_parent_and_child_analysis(self) -> None:
+    def test_planner_groups_related_sources_with_unique_ownership(self) -> None:
         self.assertIn(
-            "Do not select both a summary parent and its evidence-bearing children",
+            "Every source ID must belong to exactly one task",
             ORCHESTRATOR_PLANNING_PROMPT,
         )
 

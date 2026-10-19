@@ -8,13 +8,18 @@ from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import TreeNode, get_node_content, tree_to_summary
 from ewa_pipeline.tracking.cost_tracker import CostTracker
 from ewa_pipeline.tracking.token_tracker import TokenUsage
-from ewa_pipeline.report.schemas import AnalysisResult, DomainAnalysis
+from ewa_pipeline.report.schemas import AnalysisResult, DomainAnalysis, SectionCoverage
 from ewa_pipeline.services.progress import ProgressCallback, ProgressReporter
 from .orchestrator import EwaAnalysisState, build_ewa_graph
 from .provenance import enrich_domain_analysis_provenance
 from .skill_loader import SkillRegistry
+from .planning import prepare_sections
 
 console = Console()
+
+
+class AnalysisFailedError(RuntimeError):
+    """No source section was analysed successfully."""
 
 
 # Annotated[list, operator.add] fields — merged by appending, not overwriting
@@ -45,28 +50,32 @@ def run_analysis(
 
     skill_registry = SkillRegistry.from_dir(skills_dir)
     skills_catalog = skill_registry.catalog_text()
-    sections_available = [
-        {"id": node.id, "title": node.title, "summary": node.summary}
-        for node in sections
-    ]
     sections_content = {
         node.id: get_node_content(pages, node)
         for node in sections
     }
+    eligible_sections = [node for node in sections if sections_content[node.id].strip()]
+    if not eligible_sections:
+        raise AnalysisFailedError("No text-bearing source sections are available for analysis.")
+    sections_available, context_sections = prepare_sections(tree, eligible_sections, sections_content)
 
     initial_state: EwaAnalysisState = {
         "tree_summary": tree_to_summary(tree),
         "sections_available": sections_available,
         "sections_content": sections_content,
+        "context_sections": context_sections,
         "skills_catalog": skills_catalog,
         "section_tasks": [],
         "planning_notes": "",
+        "analysis_tasks": [],
         "domain_analyses": [],
         "failed_sections": [],
         "cross_references": [],
+        "correlation_failed": False,
         "executive_summary": "",
         "overall_system_health": "Healthy",
         "top_5_priority_actions": [],
+        "synthesis_failed": False,
     }
 
     if verbose:
@@ -76,8 +85,9 @@ def run_analysis(
     # ── Stream graph, report progress, accumulate final state ─────────────────
 
     graph = build_ewa_graph(config, cost_tracker, skill_registry)
-    total_sections = len(sections)
+    total_sections = len(eligible_sections)
     analyzed_count = 0
+    completed_tasks = 0
 
     # We accumulate state deltas ourselves so we don't need a second invoke() call.
     # Annotated[list, operator.add] fields are appended; all others are overwritten.
@@ -90,7 +100,9 @@ def run_analysis(
         detail=f"{total_sections} sections available",
     )
 
-    for chunk in graph.stream(initial_state, stream_mode="updates"):
+    for chunk in graph.stream(
+        initial_state, config={"max_concurrency": config.max_concurrency}, stream_mode="updates"
+    ):
         for node_name, update in chunk.items():
 
             # ── Accumulate state ─────────────────────────────────────────────
@@ -110,7 +122,7 @@ def run_analysis(
                     "planning",
                     "completed",
                     "Analysis plan ready",
-                    detail=f"{num_tasks} sections selected"
+                    detail=f"{num_tasks} tasks covering {total_sections} source sections"
                     + (f" — {notes}" if notes else ""),
                 )
                 reporter.emit(
@@ -129,8 +141,9 @@ def run_analysis(
 
             elif node_name == "domain_analyst":
                 new_das: list[DomainAnalysis] = update.get("domain_analyses", [])
-                new_failures: list[str] = update.get("failed_sections", [])
+                new_failures: list[dict] = update.get("failed_sections", [])
                 analyzed_count += len(new_das) + len(new_failures)
+                completed_tasks += 1
                 planned = len(accumulated.get("section_tasks", [])) or total_sections
 
                 for da in new_das:
@@ -143,14 +156,14 @@ def run_analysis(
                             f" {da.section_title} — {len(da.findings)} finding(s)"
                         )
                 for fail in new_failures:
-                    console.print(f"  [yellow]Warning[/yellow]: {fail}")
+                    console.print(f"  [yellow]Warning[/yellow]: {fail['section_id']}: {fail['reason']}")
 
                 reporter.emit(
                     "analyzing_sections",
                     "running",
                     "Analyzing sections",
-                    detail=f"{analyzed_count} / {planned}",
-                    current=analyzed_count,
+                    detail=f"{completed_tasks} / {planned} tasks; {analyzed_count} / {total_sections} sources",
+                    current=completed_tasks,
                     total=planned,
                 )
 
@@ -186,6 +199,36 @@ def run_analysis(
         for analysis in accumulated["domain_analyses"]
     ]
     cross_references = accumulated["cross_references"]
+    if not domain_analyses:
+        raise AnalysisFailedError("No source sections were analysed successfully; check task budgets and model configuration.")
+    by_id = {analysis.section_id: analysis for analysis in domain_analyses}
+    failed = {failure["section_id"]: failure["reason"] for failure in accumulated["failed_sections"]}
+    task_ids = {sid: task.task_id for task in accumulated["analysis_tasks"] for sid in task.source_section_ids}
+    coverage = [SectionCoverage(section_id=node.id, section_title=node.title,
+                analysis_task_id=task_ids.get(node.id, ""),
+                status="analyzed" if node.id in by_id else "failed",
+                reason="" if node.id in by_id else failed.get(node.id, "Source produced no result."))
+                for node in eligible_sections]
+    coverage += [SectionCoverage(section_id=node.id, section_title=node.title, status="skipped",
+                                reason="Section contains no text content.")
+                 for node in sections if node not in eligible_sections]
+    warnings = [f"Section {sid}: {reason}" for sid, reason in failed.items()]
+    if accumulated["correlation_failed"]:
+        warnings.append("Cross-reference analysis was incomplete.")
+    if accumulated["synthesis_failed"]:
+        warnings.append("Executive synthesis was unavailable.")
+    degraded = any(item.status == "failed" for item in coverage) or bool(warnings)
+    health = accumulated["overall_system_health"]
+    ranks = {"Healthy": 0, "Warning": 1, "Critical": 2}
+    for analysis in domain_analyses:
+        candidates = [analysis.overall_health]
+        if any(finding.severity == "Critical" for finding in analysis.findings):
+            candidates.append("Critical")
+        elif any(finding.severity == "High" for finding in analysis.findings):
+            candidates.append("Warning")
+        health = max([health, *candidates], key=lambda value: ranks.get(value, 0))
+    if degraded:
+        health = "Unknown"
 
     p0 = cost_tracker._entries.get("phase0_planning")
     p1 = cost_tracker._entries.get("phase1_domain_analysis")
@@ -222,7 +265,11 @@ def run_analysis(
         domain_analyses=domain_analyses,
         cross_references=cross_references,
         executive_summary=accumulated["executive_summary"],
-        overall_system_health=accumulated["overall_system_health"],
+        overall_system_health=health,
         top_5_priority_actions=accumulated["top_5_priority_actions"],
         token_usage=token_usage,
+        analysis_tasks=accumulated["analysis_tasks"],
+        coverage=coverage,
+        degraded=degraded,
+        warnings=warnings,
     )
