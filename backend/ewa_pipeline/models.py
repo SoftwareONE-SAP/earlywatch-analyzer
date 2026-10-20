@@ -31,7 +31,3 @@ def get_cross_ref_model(config: Config) -> AzureChatOpenAI:
 
 def get_synthesis_model(config: Config) -> AzureChatOpenAI:
     return _model(config, *config.model_settings("synthesis"))
-
-
-def get_indexer_model_name(config: Config) -> str:
-    return f"azure/{config.azure_openai.deployments.router}"

@@ -162,9 +162,9 @@ az containerapp update --name $app --resource-group $rg --set-env-vars `
   AZURE_OPENAI_ENDPOINT=<your-openai-endpoint> `
   AZURE_OPENAI_API_KEY=secretref:openai-api-key `
   AZURE_OPENAI_API_VERSION=<your-api-version> `
-  V2_ORCHESTRATOR_MODEL=<your-orchestrator-deployment> `
-  V2_SPECIALIST_MODEL=<your-specialist-deployment> `
-  V2_ROUTER_MODEL=<your-router-deployment> `
+  ORCHESTRATOR_MODEL=<your-orchestrator-deployment> `
+  SPECIALIST_MODEL=<your-specialist-deployment> `
+  CHAT_MODEL=<your-chat-deployment> `
   CHAT_REASONING_EFFORT=medium `
   ORCHESTRATOR_REASONING_EFFORT=medium `
   DEEP_REASONING_EFFORT=high `

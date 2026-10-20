@@ -98,6 +98,7 @@ Use GitHub Actions to build the combined image and update the Container App on e
 
 - [ ] Add the required GitHub Actions secrets.
 - [ ] Confirm `.github/workflows/deploy-to-containerapp.yml` matches the target Azure names.
+- [ ] Confirm the Container App and its image-pull registry access already exist. The workflow updates that app and atomically migrates legacy model variables with the image.
 - [ ] Run the workflow once to replace the bootstrap image with the real combined image.
 - [ ] Confirm ACR contains both the `latest` tag and the commit-SHA tag.
 

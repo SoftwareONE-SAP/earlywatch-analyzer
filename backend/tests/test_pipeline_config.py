@@ -17,9 +17,8 @@ class PipelineConfigTests(unittest.TestCase):
         environment = {
             "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
             "AZURE_OPENAI_API_KEY": "test-key",
-            "V2_ORCHESTRATOR_MODEL": "gpt-5.6-sol",
-            "V2_SPECIALIST_MODEL": "gpt-5.6-luna",
-            "V2_ROUTER_MODEL": "gpt-5.4-nano",
+            "ORCHESTRATOR_MODEL": "gpt-5.6-sol",
+            "SPECIALIST_MODEL": "gpt-5.6-luna",
             "ORCHESTRATOR_REASONING_EFFORT": "medium",
             "DEEP_REASONING_EFFORT": "low",
         }
@@ -34,9 +33,8 @@ class PipelineConfigTests(unittest.TestCase):
         environment = {
             "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
             "AZURE_OPENAI_API_KEY": "test-key",
-            "V2_ORCHESTRATOR_MODEL": "gpt-5.6-sol",
-            "V2_SPECIALIST_MODEL": "gpt-5.6-luna",
-            "V2_ROUTER_MODEL": "gpt-5.4-nano",
+            "ORCHESTRATOR_MODEL": "gpt-5.6-sol",
+            "SPECIALIST_MODEL": "gpt-5.6-luna",
         }
 
         with patch.dict(os.environ, environment, clear=True):
@@ -55,7 +53,6 @@ azure_openai:
   deployments:
     orchestrator: gpt-5.6-sol
     specialist: gpt-5.6-luna
-    router: gpt-5.4-nano
 pricing: {}
 """
         environment = {

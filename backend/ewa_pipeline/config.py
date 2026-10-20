@@ -8,7 +8,6 @@ import yaml
 class DeploymentsConfig(BaseModel):
     orchestrator: str
     specialist: str
-    router: str
     cross_reference: str | None = None
     synthesis: str | None = None
 
@@ -128,9 +127,8 @@ def _build_env_config() -> Config:
     api_key = _first_env("AZURE_OPENAI_API_KEY")
     api_version = _first_env("AZURE_OPENAI_API_VERSION") or "2025-03-01-preview"
 
-    orchestrator_deployment = _first_env("ORCHESTRATOR_MODEL", "V2_ORCHESTRATOR_MODEL")
-    specialist_deployment = _first_env("SPECIALIST_MODEL", "V2_SPECIALIST_MODEL")
-    router_deployment = _first_env("V2_ROUTER_MODEL")
+    orchestrator_deployment = _first_env("ORCHESTRATOR_MODEL")
+    specialist_deployment = _first_env("SPECIALIST_MODEL")
     reasoning = _reasoning_env()
 
     missing = []
@@ -139,11 +137,9 @@ def _build_env_config() -> Config:
     if not api_key:
         missing.append("AZURE_OPENAI_API_KEY")
     if not orchestrator_deployment:
-        missing.append("V2_ORCHESTRATOR_MODEL")
+        missing.append("ORCHESTRATOR_MODEL")
     if not specialist_deployment:
-        missing.append("V2_SPECIALIST_MODEL")
-    if not router_deployment:
-        missing.append("V2_ROUTER_MODEL")
+        missing.append("SPECIALIST_MODEL")
     if missing:
         missing_list = ", ".join(missing)
         raise FileNotFoundError(
@@ -160,7 +156,6 @@ def _build_env_config() -> Config:
                 "deployments": {
                     "orchestrator": orchestrator_deployment,
                     "specialist": specialist_deployment,
-                    "router": router_deployment,
                     "cross_reference": _first_env("CROSS_REFERENCE_MODEL") or None,
                     "synthesis": _first_env("SYNTHESIS_MODEL") or None,
                 },

@@ -75,7 +75,9 @@ async def chat_with_document(
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
         api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        model_name = os.getenv("V2_ORCHESTRATOR_MODEL", "gpt-4.1")
+        model_name = os.getenv("CHAT_MODEL", "").strip()
+        if not model_name:
+            raise HTTPException(status_code=500, detail="CHAT_MODEL is not configured.")
         reasoning_effort = get_reasoning_effort("CHAT_REASONING_EFFORT")
         logger.info("Azure endpoint set: %s, model: %s", bool(azure_endpoint), model_name)
 

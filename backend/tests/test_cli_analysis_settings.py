@@ -28,9 +28,6 @@ from ewa_pipeline.report.schemas import (
 SETTINGS = {
     "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
     "AZURE_OPENAI_API_KEY": "synthetic-not-a-key",
-    "V2_ORCHESTRATOR_MODEL": "legacy-planner",
-    "V2_SPECIALIST_MODEL": "legacy-specialist",
-    "V2_ROUTER_MODEL": "unchanged-router",
     "DEEP_REASONING_EFFORT": "low",
     "ORCHESTRATOR_MODEL": "gpt-6-luna",
     "SPECIALIST_MODEL": "gpt-6.1-sol",
@@ -55,11 +52,10 @@ def configured():
 
 
 class CLIAnalysisSettingsTests(unittest.TestCase):
-    def test_cli_settings_override_legacy_aliases_and_keep_router(self):
+    def test_cli_settings_work_without_any_legacy_or_router_variables(self):
         config = configured()
         self.assertEqual(config.azure_openai.deployments.orchestrator, "gpt-6-luna")
         self.assertEqual(config.azure_openai.deployments.specialist, "gpt-6.1-sol")
-        self.assertEqual(config.azure_openai.deployments.router, "unchanged-router")
         self.assertEqual(config.reasoning.orchestrator, "xhigh")
         self.assertEqual(config.reasoning.deep, "medium")
         self.assertEqual(config.model_settings("cross_reference"), ("gpt-6.1-sol", "high"))
@@ -80,21 +76,28 @@ class CLIAnalysisSettingsTests(unittest.TestCase):
         self.assertEqual(config.model_settings("cross_reference"), ("gpt-6-luna", "none"))
         self.assertEqual(config.model_settings("synthesis"), ("gpt-6.1-sol", "xhigh"))
 
-    def test_blank_overrides_keep_legacy_environment_working(self):
-        env = {**SETTINGS, "ORCHESTRATOR_MODEL": "", "SPECIALIST_MODEL": "",
+    def test_blank_optional_overrides_keep_defaults(self):
+        env = {**SETTINGS,
                "SPECIALIST_REASONING_EFFORT": "", "CROSS_REFERENCE_MODEL": "",
                "CROSS_REFERENCE_REASONING_EFFORT": "", "SYNTHESIS_MODEL": "",
                "SYNTHESIS_REASONING_EFFORT": "", "MAX_CONCURRENCY": "",
                "REQUEST_TIMEOUT_SECONDS": "", "PLANNING_TIMEOUT_SECONDS": ""}
         with patch.dict(os.environ, env, clear=True):
             config = _build_env_config()
-        self.assertEqual(config.azure_openai.deployments.orchestrator, "legacy-planner")
-        self.assertEqual(config.azure_openai.deployments.specialist, "legacy-specialist")
+        self.assertEqual(config.azure_openai.deployments.orchestrator, "gpt-6-luna")
+        self.assertEqual(config.azure_openai.deployments.specialist, "gpt-6.1-sol")
         self.assertEqual(config.reasoning.deep, "low")
-        self.assertEqual(config.model_settings("synthesis"), ("legacy-planner", "xhigh"))
+        self.assertEqual(config.model_settings("synthesis"), ("gpt-6-luna", "xhigh"))
         self.assertEqual(config.max_concurrency, 4)
         self.assertEqual(config.request_timeout_seconds, 180)
         self.assertIsNone(config.planning_timeout_seconds)
+
+    def test_legacy_model_variables_cannot_replace_required_current_names(self):
+        for name, old_name in (("ORCHESTRATOR_MODEL", "V2_ORCHESTRATOR_MODEL"),
+                               ("SPECIALIST_MODEL", "V2_SPECIALIST_MODEL")):
+            with self.subTest(name=name), patch.dict(os.environ, {**SETTINGS, name: "", old_name: "legacy"}, clear=True):
+                with self.assertRaisesRegex(FileNotFoundError, name):
+                    _build_env_config()
 
     def test_invalid_runtime_budgets_are_rejected(self):
         for key in ("MAX_CONCURRENCY", "REQUEST_TIMEOUT_SECONDS", "PLANNING_TIMEOUT_SECONDS",

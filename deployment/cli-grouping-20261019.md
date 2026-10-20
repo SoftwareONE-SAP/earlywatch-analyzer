@@ -17,6 +17,7 @@ revision. See [Microsoft's environment-variable instructions](https://learn.micr
 | `ORCHESTRATOR_MODEL` | `gpt-6-luna` |
 | `ORCHESTRATOR_REASONING_EFFORT` | `xhigh` |
 | `SPECIALIST_MODEL` | `gpt-6.1-sol` |
+| `CHAT_MODEL` | `gpt-6.1-sol` (preserved from the previous chat setting) |
 | `SPECIALIST_REASONING_EFFORT` | `medium` |
 | `CROSS_REFERENCE_MODEL` | `gpt-6.1-sol` |
 | `CROSS_REFERENCE_REASONING_EFFORT` | `high` |
@@ -29,9 +30,12 @@ revision. See [Microsoft's environment-variable instructions](https://learn.micr
 | `MAX_TASK_CONTENT_CHARS` | `48000` |
 | `MAX_PARENT_CONTEXT_CHARS` | `4000` |
 
-`ORCHESTRATOR_MODEL` and `SPECIALIST_MODEL` take precedence over the corresponding
-legacy `V2_*` variables. `SPECIALIST_REASONING_EFFORT` takes precedence over
-`DEEP_REASONING_EFFORT`. Edit the new variables above when tuning this deployment.
+The October 20 cleanup removes the legacy model aliases. Use `ORCHESTRATOR_MODEL`,
+`SPECIALIST_MODEL`, and the independent `CHAT_MODEL` setting. The Actions workflow
+migrates missing current names from the existing model selections, then removes
+all obsolete `V2_*` settings in the same update as the new image. Existing Portal
+selections are preserved on repeated deployments. `SPECIALIST_REASONING_EFFORT`
+still takes precedence over `DEEP_REASONING_EFFORT`.
 Blank cross-reference/synthesis values inherit their corresponding planner
 setting independently. Blank planner timeout inherits the request timeout.
 `MAX_PARENT_CONTEXT_CHARS=0` disables supplementary ancestor excerpts.

@@ -29,7 +29,6 @@ class ModelConfigurationTests(unittest.TestCase):
                     "deployments": {
                         "orchestrator": "gpt-5.6-sol",
                         "specialist": "gpt-5.6-luna",
-                        "router": "gpt-5.4-nano",
                     },
                 },
                 "reasoning": {"orchestrator": "medium", "deep": "low"},

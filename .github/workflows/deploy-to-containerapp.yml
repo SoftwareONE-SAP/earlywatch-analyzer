@@ -18,6 +18,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Test model settings migration
+        run: python3 -m unittest discover -s deployment/tests -v
+
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -46,19 +49,10 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-      - name: Create or update Container App
+      - name: Deploy Container App and migrate model settings
         run: |
           set -euo pipefail
-          ACR_NAME="${REGISTRY%%.*}"
-          ACR_USERNAME="$(az acr credential show --name "$ACR_NAME" --query username -o tsv)"
-          ACR_PASSWORD="$(az acr credential show --name "$ACR_NAME" --query passwords[0].value -o tsv)"
-          az containerapp up \
+          python3 deployment/deploy_containerapp.py \
+            --app "${{ secrets.AZURE_CONTAINER_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ secrets.AZURE_CONTAINER_APP_NAME }}" \
-            --environment "${{ secrets.AZURE_CONTAINERAPPS_ENVIRONMENT }}" \
-            --ingress external \
-            --target-port 8001 \
-            --image "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
-            --registry-server "${{ env.REGISTRY }}" \
-            --registry-username "$ACR_USERNAME" \
-            --registry-password "$ACR_PASSWORD"
+            --image "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"

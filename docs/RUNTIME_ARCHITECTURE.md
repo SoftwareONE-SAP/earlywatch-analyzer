@@ -41,10 +41,6 @@ Required for the backend:
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI or Azure AI Services endpoint. |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key. |
 | `AZURE_OPENAI_API_VERSION` | API version used by the SDK. |
-| `AZURE_OPENAI_SUMMARY_MODEL` | Legacy fallback — see V2 pipeline variables below. |
-| `AZURE_OPENAI_PARAM_MODEL` | Legacy fallback — see V2 pipeline variables below. |
-| `AZURE_OPENAI_FAST_MODEL` | Legacy fallback — see V2 pipeline variables below. |
-| `AZURE_OPENAI_CHAT_MODEL` | Legacy fallback — see V2 pipeline variables below. |
 | `CHAT_REASONING_EFFORT` | Reasoning effort for document chat. Required. |
 | `ORCHESTRATOR_REASONING_EFFORT` | Reasoning effort for planner, cross-reference, and synthesis. Required. |
 | `DEEP_REASONING_EFFORT` | Reasoning effort for specialist/domain-analysis workers. Required. |
@@ -56,9 +52,9 @@ Recommended for the one-container Container Apps path:
 | `ENVIRONMENT=production` | Enables production defaults. |
 | `AUTH_ENABLED=true` | Turns on backend authorization checks. |
 | `TRUST_PLATFORM_AUTH_HEADERS=true` | Trusts Container Apps auth headers instead of requiring SPA bearer tokens. |
-| `V2_ORCHESTRATOR_MODEL` | Deployment used by the planner, cross-reference, and synthesis steps. Most capable model. |
-| `V2_SPECIALIST_MODEL` | Deployment used by the parallel domain analyst subagents. |
-| `V2_ROUTER_MODEL` | Deployment used for routing decisions and page indexing. Fastest/cheapest model.
+| `ORCHESTRATOR_MODEL` | Required planner deployment; default for downstream analysis roles. |
+| `SPECIALIST_MODEL` | Required parallel specialist deployment. |
+| `CHAT_MODEL` | Required independent document-chat deployment. |
 
 Direct JWT validation variables remain available for deployments where the frontend sends bearer tokens:
 
@@ -76,9 +72,6 @@ Optional Anthropic-on-Azure variables:
 | `AZURE_ANTHROPIC_ENDPOINT` | Azure AI Foundry Anthropic endpoint. |
 | `AZURE_ANTHROPIC_API_KEY` | Anthropic provider key. |
 | `ANTHROPIC_SUMMARY_MODEL` | Legacy summary model. |
-| `V2_ANTHROPIC_ROUTER_MODEL` | Router model for the V2 pipeline. |
-| `V2_ANTHROPIC_SPECIALIST_MODEL` | Specialist model for the V2 pipeline. |
-| `V2_ANTHROPIC_DEEP_MODEL` | Deep analysis model for the V2 pipeline. |
 
 ## Authentication Model
 
