@@ -28,6 +28,7 @@ from core.azure_clients import (
     AZURE_STORAGE_CONTAINER_NAME,
 )
 from services.storage_service import StorageService
+from services.processing_state import ProcessingStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class EWAWorkflowOrchestrator:
 
     def __init__(self):
         self._config = None
+        self.processing_state = ProcessingStateStore(blob_service_client, AZURE_STORAGE_CONTAINER_NAME)
 
     def _get_config(self):
         """Lazy-load pipeline config from config.yaml."""
@@ -113,6 +115,8 @@ class EWAWorkflowOrchestrator:
     async def execute_workflow(
         self,
         blob_name: str,
+        *,
+        processing_run_id: str | None = None,
     ) -> dict:
         """
         Execute the full analysis workflow on a blob.
@@ -148,9 +152,10 @@ class EWAWorkflowOrchestrator:
             )
 
             if not result["success"]:
-                await self._set_workflow_status_metadata(
-                    blob_name, "failed", result.get("message", "Pipeline failed")
-                )
+                if processing_run_id is None:
+                    await self._set_workflow_status_metadata(
+                        blob_name, "failed", result.get("message", "Pipeline failed")
+                    )
                 return result
 
             self._attach_run_usage_summary(
@@ -160,11 +165,16 @@ class EWAWorkflowOrchestrator:
             )
 
             # 3. Upload artifacts back to blob storage
+            if processing_run_id is not None and not await asyncio.to_thread(
+                self.processing_state.owns, blob_name, processing_run_id
+            ):
+                raise asyncio.CancelledError("Analysis run no longer owns this document")
             logger.info("[WORKFLOW] Uploading artifacts for %s", base_name)
             artifact_names = await self._upload_artifacts(base_name, result)
 
             # 4. Set success metadata
-            await self._set_workflow_status_metadata(blob_name, "completed")
+            if processing_run_id is None:
+                await self._set_workflow_status_metadata(blob_name, "completed")
 
             return {
                 "success": True,
@@ -181,7 +191,8 @@ class EWAWorkflowOrchestrator:
 
         except Exception as e:
             logger.exception("[WORKFLOW] Unexpected error: %s", e)
-            await self._set_workflow_status_metadata(blob_name, "failed", str(e))
+            if processing_run_id is None:
+                await self._set_workflow_status_metadata(blob_name, "failed", str(e))
             return {
                 "success": False,
                 "message": f"Workflow failed: {str(e)}",

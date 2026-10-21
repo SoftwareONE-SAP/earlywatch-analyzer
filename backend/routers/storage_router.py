@@ -26,6 +26,7 @@ from core.azure_clients import (
     AZURE_STORAGE_CONTAINER_NAME,
 )
 from services.storage_service import StorageService
+from services.processing_state import ProcessingStateStore
 from workflow_orchestrator import EWAWorkflowOrchestrator
 from core.entra_auth import require_auth
 
@@ -312,6 +313,7 @@ async def list_files(_user: dict = Depends(require_auth())):
 
         files: list[dict[str, Any]] = []
         file_groups: dict[str, list[dict[str, Any]]] = {}  # Group by customer+SID
+        processing_state = ProcessingStateStore(blob_service_client, AZURE_STORAGE_CONTAINER_NAME)
         
         original_uploads = {
             os.path.splitext(b.name)[0]
@@ -337,8 +339,7 @@ async def list_files(_user: dict = Depends(require_auth())):
             if name_low.endswith((".html", ".htm")) and base_name in original_uploads:
                 continue
 
-            blob_client = container_client.get_blob_client(blob.name)
-            properties = await asyncio.to_thread(blob_client.get_blob_properties)
+            properties = await asyncio.to_thread(processing_state.read, blob.name)
             metadata = properties.metadata or {}
 
             base_name, _ = os.path.splitext(blob.name)

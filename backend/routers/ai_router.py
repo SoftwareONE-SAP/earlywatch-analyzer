@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import logging
+from contextlib import suppress
 from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -23,25 +24,46 @@ from core.azure_clients import (
 )
 from workflow_orchestrator import ewa_orchestrator
 from core.entra_auth import require_auth
+from services.processing_state import HEARTBEAT_INTERVAL_SECONDS, INTERRUPTED_MESSAGE
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["ai-workflow"])
 
 
-async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
+async def _heartbeat_processing(blob_name: str, run_id: str, worker: asyncio.Task):
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        try:
+            owned = await asyncio.to_thread(ewa_orchestrator.processing_state.renew, blob_name, run_id)
+        except Exception:
+            logger.warning("[PROCESS] Could not renew worker heartbeat for %s", blob_name, exc_info=True)
+            continue
+        if not owned:
+            logger.warning("[PROCESS] Worker lost ownership of %s; stopping its workflow", blob_name)
+            worker.cancel()
+            return
+
+
+async def _run_processing_flow(original_blob_name: str, run_id: str) -> Dict[str, Any]:
+    worker = asyncio.create_task(_execute_processing_flow(original_blob_name, run_id))
+    heartbeat = asyncio.create_task(_heartbeat_processing(original_blob_name, run_id, worker))
+    try:
+        return await worker
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat
+
+
+async def _execute_processing_flow(original_blob_name: str, run_id: str) -> Dict[str, Any]:
     base_name, _ = os.path.splitext(original_blob_name)
     html_blob_name = original_blob_name if original_blob_name.lower().endswith((".htm", ".html")) else f"{base_name}.html"
     container_client = blob_service_client.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
 
-    # Set processing flag in metadata
     try:
-        await ewa_orchestrator.set_processing_flag(original_blob_name, True)
-        logger.info("[PROCESS] Set processing=true metadata on %s", original_blob_name)
-    except Exception as meta_err:
-        logger.warning("[PROCESS] Could not set processing metadata: %s", meta_err)
-
-    try:
+        if not await asyncio.to_thread(ewa_orchestrator.processing_state.owns, original_blob_name, run_id):
+            raise asyncio.CancelledError("Analysis run no longer owns this document")
         # Delete all derived artifacts except the original and normalized source files.
         logger.info("[PROCESS] Cleaning derived blobs for %s", base_name)
         try:
@@ -73,30 +95,30 @@ async def _run_processing_flow(original_blob_name: str) -> Dict[str, Any]:
 
         # Run analysis (normalized source guaranteed to exist)
         logger.info("[PROCESS] Starting workflow execution for %s", original_blob_name)
-        result = await ewa_orchestrator.execute_workflow(original_blob_name)
+        result = await ewa_orchestrator.execute_workflow(original_blob_name, processing_run_id=run_id)
+        await asyncio.to_thread(
+            ewa_orchestrator.processing_state.finish, original_blob_name, run_id,
+            "completed" if result.get("success") else "failed",
+            None if result.get("success") else result.get("message", "Analysis failed. Please try again."),
+        )
         logger.info("[PROCESS] Workflow completed with result: %s", result)
         return result
-    except HTTPException as http_err:
-        await ewa_orchestrator._set_workflow_status_metadata(
-            original_blob_name,
-            "failed",
-            str(getattr(http_err, "detail", http_err)),
-        )
+    except asyncio.CancelledError:
+        logger.warning("[PROCESS] Analysis interrupted for %s", original_blob_name)
         raise
     except Exception as exc:
-        await ewa_orchestrator._set_workflow_status_metadata(
-            original_blob_name,
-            "failed",
-            str(exc),
-        )
+        await asyncio.to_thread(ewa_orchestrator.processing_state.finish,
+                              original_blob_name, run_id, "failed",
+                              str(getattr(exc, "detail", exc)))
         raise
     finally:
-        # Clear processing flag after completion (success or failure)
+        # Conditional ownership prevents an old worker from clearing a newer run.
         try:
-            await ewa_orchestrator.set_processing_flag(original_blob_name, False)
-            logger.info("[PROCESS] Cleared processing metadata on %s", original_blob_name)
-        except Exception as meta_err:
-            logger.warning("[PROCESS] Could not clear processing metadata: %s", meta_err)
+            await asyncio.to_thread(ewa_orchestrator.processing_state.finish,
+                                  original_blob_name, run_id, "failed", INTERRUPTED_MESSAGE)
+        except Exception:
+            logger.warning("[PROCESS] Could not finish metadata for %s; heartbeat expiry will recover it",
+                           original_blob_name, exc_info=True)
 
 
 
@@ -116,29 +138,17 @@ async def process_and_analyze_document_endpoint(
     try:
         blob_name = request.blob_name
 
-        # If a run is already in-flight, return a non-error response and let the client poll status.
-        try:
-            blob_client = blob_service_client.get_blob_client(
-                container=AZURE_STORAGE_CONTAINER_NAME,
-                blob=blob_name,
-            )
-            props = await asyncio.to_thread(blob_client.get_blob_properties)
-            metadata = dict(props.metadata or {})
-            if metadata.get("processing", "").lower() == "true":
-                return {
-                    "success": True,
-                    "started": False,
-                    "message": "Processing is already running for this file.",
-                    "original_file": blob_name,
-                }
-        except Exception as meta_err:
-            logger.warning("[PROCESS] Could not read processing metadata before enqueue: %s", meta_err)
+        # Claim atomically, recovering an interrupted run before allowing a retry.
+        run_id = await asyncio.to_thread(ewa_orchestrator.processing_state.claim, blob_name)
+        if run_id is None:
+            return {
+                "success": True,
+                "started": False,
+                "message": "Processing is already running for this file.",
+                "original_file": blob_name,
+            }
 
-        # Set metadata immediately so UI polling reflects in-progress state right away.
-        await ewa_orchestrator.set_processing_flag(blob_name, True)
-        await ewa_orchestrator._set_workflow_status_metadata(blob_name, "processing")
-
-        background_tasks.add_task(_run_processing_flow, blob_name)
+        background_tasks.add_task(_run_processing_flow, blob_name, run_id)
 
         return {
             "success": True,
@@ -217,29 +227,16 @@ async def reprocess_document_with_ai(
     logger.info("[REPROCESS] Starting reprocess for %s", original_blob_name)
 
     try:
-        # If a run is already in-flight, return a non-error response and let the client poll status.
-        try:
-            blob_client = blob_service_client.get_blob_client(
-                container=AZURE_STORAGE_CONTAINER_NAME,
-                blob=original_blob_name,
-            )
-            props = await asyncio.to_thread(blob_client.get_blob_properties)
-            metadata = dict(props.metadata or {})
-            if metadata.get("processing", "").lower() == "true":
-                return {
-                    "success": True,
-                    "started": False,
-                    "message": "Re-analysis is already running for this file.",
-                    "original_file": original_blob_name,
-                }
-        except Exception as meta_err:
-            logger.warning("[REPROCESS] Could not read processing metadata before enqueue: %s", meta_err)
+        run_id = await asyncio.to_thread(ewa_orchestrator.processing_state.claim, original_blob_name)
+        if run_id is None:
+            return {
+                "success": True,
+                "started": False,
+                "message": "Re-analysis is already running for this file.",
+                "original_file": original_blob_name,
+            }
 
-        # Set metadata immediately so UI polling reflects in-progress state right away.
-        await ewa_orchestrator.set_processing_flag(original_blob_name, True)
-        await ewa_orchestrator._set_workflow_status_metadata(original_blob_name, "processing")
-
-        background_tasks.add_task(_run_processing_flow, original_blob_name)
+        background_tasks.add_task(_run_processing_flow, original_blob_name, run_id)
 
         logger.info("[REPROCESS] Re-analysis queued for %s", original_blob_name)
         return {
