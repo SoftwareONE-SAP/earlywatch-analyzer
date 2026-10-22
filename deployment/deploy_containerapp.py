@@ -11,18 +11,23 @@ MODEL_ALIASES = {
     "SPECIALIST_MODEL": "V2_SPECIALIST_MODEL",
     "CHAT_MODEL": "V2_ORCHESTRATOR_MODEL",
 }
-MODEL_NAMES = sorted(set(MODEL_ALIASES) | set(MODEL_ALIASES.values()))
-MODEL_FILTER = " || ".join(f"name=='{name}'" for name in MODEL_NAMES)
+REASONING_NAMES = (
+    "ORCHESTRATOR_REASONING_EFFORT", "SPECIALIST_REASONING_EFFORT",
+    "CROSS_REFERENCE_REASONING_EFFORT", "SYNTHESIS_REASONING_EFFORT",
+    "CHAT_REASONING_EFFORT", "DEEP_REASONING_EFFORT",
+)
+SETTING_NAMES = sorted(set(MODEL_ALIASES) | set(MODEL_ALIASES.values()) | set(REASONING_NAMES))
+SETTINGS_FILTER = " || ".join(f"name=='{name}'" for name in SETTING_NAMES)
 SETTINGS_QUERY = (
     "{container:properties.template.containers[0].name,"
-    f"models:properties.template.containers[0].env[?{MODEL_FILTER}]."
+    f"models:properties.template.containers[0].env[?{SETTINGS_FILTER}]."
     "{name:name,value:value,secretRef:secretRef},"
     "legacyNames:properties.template.containers[0].env[?starts_with(name,'V2_')].name}"
 )
 
 
 def migration(settings: dict) -> tuple[list[str], list[str]]:
-    """Only seed missing current names; preserve every explicit Portal selection."""
+    """Seed current names and correct the x-high typo; retain other Portal choices."""
     models = {item["name"]: item for item in settings.get("models") or []}
 
     def value(name):
@@ -39,6 +44,12 @@ def migration(settings: dict) -> tuple[list[str], list[str]]:
         if not inherited:
             raise ValueError(f"Configure {current} on the Container App before deployment.")
         additions.append(f"{current}={inherited}")
+    for name in REASONING_NAMES:
+        item = models.get(name, {})
+        # Canonicalize this known spelling error without fetching secrets or
+        # choosing a different reasoning level, default, or model deployment.
+        if not item.get("secretRef") and value(name).lower() == "x-high":
+            additions.append(f"{name}=xhigh")
     removals = sorted({name for name in settings.get("legacyNames") or [] if name.startswith("V2_")})
     return additions, removals
 
@@ -60,7 +71,7 @@ def deploy(app: str, resource_group: str, image: str) -> None:
     command += ["--query", "{image:properties.template.containers[0].image,revision:properties.latestRevisionName}",
                 "--output", "json"]
     subprocess.run(command, check=True)
-    print(f"Model settings migration: {len(additions)} missing names populated; {len(removals)} legacy names removed.")
+    print(f"Model settings migration: {len(additions)} settings populated/corrected; {len(removals)} legacy names removed.")
 
 
 def main():
