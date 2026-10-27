@@ -13,8 +13,10 @@ synthesize      (synthesis deployment) Produces the executive summary and priori
 
 from __future__ import annotations
 
+import html
 import json
 import operator
+import re
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -128,6 +130,43 @@ def _derive_health(analyses: list[DomainAnalysis]) -> str:
     return "Healthy"
 
 
+_ROW = r"<tr(?:\s[^>]*)?>(.*?)</tr\s*>"
+_TR_RE = re.compile(r"\s*(?:" + _ROW + r"\s*)+", re.IGNORECASE | re.DOTALL)
+_ROW_RE = re.compile(_ROW, re.IGNORECASE | re.DOTALL)
+_CELL_RE = re.compile(r"<t[dh](?:\s[^>]*)?>(.*?)</t[dh]\s*>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
+_ID_PREFIX_RE = re.compile(r"^\s*\d{4}\s*[,:]\s*")
+
+
+def clean_evidence(text: str) -> str:
+    """Make finding evidence readable: no HTML tags, source-ID prefixes or [IMAGE] lines."""
+    if not text:
+        return text
+
+    def _rows(match: re.Match) -> str:
+        lines = []
+        for row in _ROW_RE.findall(match.group(0)):
+            cells = [_TAG_RE.sub("", c).strip() for c in _CELL_RE.findall(row)]
+            lines.append(" | ".join(cells))
+        return "\n" + "\n".join(lines) + "\n"
+
+    text = _TR_RE.sub(_rows, text)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text)
+
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = _ID_PREFIX_RE.sub("", raw.rstrip(), count=1).rstrip()
+        if line.strip().strip("\"'").strip() == "[IMAGE]":
+            continue
+        if not line.strip() and (not lines or not lines[-1]):
+            continue
+        lines.append(line)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
 def _normalise_finding_ids(
     analysis: DomainAnalysis,
     *,
@@ -137,7 +176,12 @@ def _normalise_finding_ids(
     """Use trusted section metadata and globally unambiguous finding IDs."""
     trusted_id = str(section_id or analysis.section_id).strip()
     findings = [
-        finding.model_copy(update={"id": f"{trusted_id}-F{index:03d}"})
+        finding.model_copy(
+            update={
+                "id": f"{trusted_id}-F{index:03d}",
+                "evidence": clean_evidence(finding.evidence),
+            }
+        )
         for index, finding in enumerate(analysis.findings, start=1)
     ]
     return analysis.model_copy(

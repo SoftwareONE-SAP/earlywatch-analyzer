@@ -57,6 +57,7 @@ Focus: {analysis_focus}
 
 <finding_fields>
 - evidence: verbatim report quote(s) with values, units and the [RED]/[YELLOW]/[GREEN] token where present. No interpretation.
+  Write table rows as plain text, one row per line: "Column: value; Column: value". Never copy HTML tags, never prefix source/section IDs, never quote [IMAGE].
 - description: interpretation only (meaning, likely cause). Do not restate evidence.
 - confidence: High = report's own rating or explicit value supports it; Medium = inferred from report values plus skill thresholds; Low = heuristic or incomplete data. confidence_reason: one sentence.
 - to_confirm: one concrete check (transaction or report) only if supported; else empty.
@@ -118,6 +119,7 @@ Do not omit, duplicate, or invent source IDs. Use only report- or skill-supporte
 
 Finding fields:
 - evidence: verbatim report quote(s) with values, units and the [RED]/[YELLOW]/[GREEN] token where present. No interpretation.
+  Write table rows as plain text, one row per line: "Column: value; Column: value". Never copy HTML tags, never prefix source/section IDs, never quote [IMAGE].
 - description: interpretation only (meaning, likely cause). Do not restate evidence.
 - confidence: High = report's own rating or explicit value supports it; Medium = inferred from report values plus skill thresholds; Low = heuristic or incomplete data. confidence_reason: one sentence.
 - to_confirm: one concrete check (transaction or report) only if supported; else empty.
