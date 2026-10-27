@@ -189,7 +189,7 @@ class SapVsUsTests(unittest.TestCase):
         result.reconciliation = [
             _row("Alert", "Agree", sap_topic="Alerts", sap_item="Kernel old", sap_rating="RED",
                  our_section_id="1", our_section_title="Software Configuration",
-                 our_rating="RED", finding_ids=["F-001", "F-003"], match_score=0.8),
+                 our_rating="RED", finding_ids=["F-001", "F-003"], match_score=0.8, match_method="Decision-1"),
             _row("Alert", "Not covered", sap_item="Odd alert", sap_rating="YELLOW"),
             _row("Check", "Agree", sap_topic="Performance", sap_rating="GREEN", our_rating="GREEN"),
             _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
@@ -212,6 +212,7 @@ class SapVsUsTests(unittest.TestCase):
         self.assertEqual(first["Our Finding IDs"], "F-001, F-003")
         self.assertEqual(first["Verdict"], "Agree")
         self.assertEqual(first["Match score"], 0.8)
+        self.assertEqual(first["Matched by"], "Decision-1")
         self.assertEqual(ws.freeze_panes, f"A{hdr_row + 1}")
 
     def test_verified_healthy_rows_and_sap_disagrees(self):
