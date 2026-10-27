@@ -28,6 +28,7 @@ _C_BORDER   = "BFBFBF"
 
 _SEV_BG = {"Critical": "C00000", "High": "ED7D31", "Medium": "FFC000", "Low": "548235"}
 _SEV_FG = {"Critical": "FFFFFF", "High": "FFFFFF", "Medium": "000000", "Low": "FFFFFF"}
+_SEV_ORDER = ["Critical", "High", "Medium", "Low"]
 _HEALTH_BG = {"Critical": "C00000", "Warning": "ED7D31", "Healthy": "548235"}
 
 # SAP's own traffic-light ratings, and the "SAP vs Us" verdict colours.
@@ -109,6 +110,14 @@ def _kpi_tile(ws, top_left, bottom_right, label, value, bg, fg="FFFFFF"):
     c.fill = _fill(bg)
     c.font = Font(name=_F_HDR, bold=True, size=18, color=fg)
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+def _worst_severity(findings):
+    """Most serious severity among findings, or None when there are none."""
+    present = {f.severity for f in findings}
+    for sev in _SEV_ORDER:
+        if sev in present:
+            return sev
+    return None
 
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
@@ -195,15 +204,23 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
 
     # Section table
     tbl_hdr_row = r
-    col_headers = ["Section", "Health", "Findings", "Critical", "High", "Medium", "Low"]
+    col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
     _hdr_row(ws, tbl_hdr_row, col_headers, start_col=2)
     ws.row_dimensions[tbl_hdr_row].height = 24
     ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
-    r = tbl_hdr_row + 1
-    for idx, da in enumerate(result.domain_analyses):
+    # Worst section first: by worst severity, then most findings, then original order.
+    rows = []
+    for orig, da in enumerate(result.domain_analyses):
         if da.section_id not in sheet_map:
             continue
+        worst = _worst_severity(da.findings)
+        rank = _SEV_ORDER.index(worst) if worst else len(_SEV_ORDER)
+        rows.append((rank, -len(da.findings), orig, da, worst))
+    rows.sort(key=lambda t: t[:3])
+
+    r = tbl_hdr_row + 1
+    for idx, (_rank, _n, _orig, da, worst) in enumerate(rows):
         sname = sheet_map[da.section_id]
         ref = _sheet_ref(sname)
 
@@ -211,8 +228,8 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         lc.hyperlink = f"#'{sname}'!A1"
         lc.font = _font(color=_C_LINK)
 
-        hc = ws.cell(row=r, column=3, value=da.overall_health)
-        hc.font = _font(bold=True, color="FFFFFF")
+        hc = ws.cell(row=r, column=3, value=worst)
+        hc.font = _font(bold=True, color=_SEV_FG.get(worst, "000000"))
         hc.alignment = _align(h="center")
 
         sev_col = "B"
@@ -230,8 +247,9 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         if idx % 2 == 0:
             for col in range(2, 9):
                 ws.cell(row=r, column=col).fill = _fill(_C_ALT)
-        # Health colour overrides alt shade
-        hc.fill = _fill(_HEALTH_BG.get(da.overall_health, "888888"))
+        # Severity colour overrides alt shade (blank cell keeps the alt shade)
+        if worst:
+            hc.fill = _fill(_SEV_BG[worst])
 
         ws.row_dimensions[r].height = 22
         r += 1
@@ -436,7 +454,7 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
         if best is None or _RATING_ORDER[row.sap_rating] < _RATING_ORDER[best]:
             sap_rating[row.our_section_id] = row.sap_rating
 
-    ws = wb.create_sheet("Verified Healthy")
+    ws = wb.create_sheet("No Issues Found")
     _apply_app_style(ws, zoom=110)
     ws.sheet_properties.tabColor = _HEALTH_BG["Healthy"]
     _hdr_row(ws, 1, ["Section", "SAP rating", "Note"])
@@ -636,7 +654,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     sheet_map: dict[str, str] = {}
     used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Remediation Plan", "Document Structure",
-                      "Token Usage", "Analysis Tasks", "Source Coverage", "SAP vs Us", "Verified Healthy"}
+                      "Token Usage", "Analysis Tasks", "Source Coverage", "SAP vs Us", "No Issues Found"}
     for da in result.domain_analyses:
         if not da.findings:
             continue

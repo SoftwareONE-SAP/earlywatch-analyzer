@@ -227,7 +227,7 @@ class SapVsUsTests(unittest.TestCase):
             _row("Check", "Agree", sap_topic="Database", sap_rating="RED", our_section_id="4"),
         ]
         wb = self._generate(result)
-        ws = wb["Verified Healthy"]
+        ws = wb["No Issues Found"]
         self.assertEqual(ws.max_row, 3)  # header + 2 healthy sections
         rows = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value) for r in (2, 3)}
         self.assertFalse(any(rows["3 Hardware"]))
@@ -239,18 +239,65 @@ class SapVsUsTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[1:4], ["All Findings", "SAP vs Us", "Verified Healthy"])
+        self.assertEqual(names[1:4], ["All Findings", "SAP vs Us", "No Issues Found"])
 
     def test_old_payload_has_neither_sheet(self):
         wb = self._generate(build_result())
-        self.assertNotIn("SAP vs Us", wb.sheetnames)
         self.assertNotIn("Verified Healthy", wb.sheetnames)
+        self.assertNotIn("SAP vs Us", wb.sheetnames)
+        self.assertNotIn("No Issues Found", wb.sheetnames)
 
     def test_coverage_without_healthy_sections_skips_sheet(self):
         result = build_result()
         result.coverage = [SectionCoverage(section_id="1", section_title="Software Configuration",
                                            status="analyzed")]
-        self.assertNotIn("Verified Healthy", self._generate(result).sheetnames)
+        self.assertNotIn("No Issues Found", self._generate(result).sheetnames)
+
+
+def _finding(fid: str, severity: str) -> Finding:
+    return Finding(
+        id=fid, title=f"Finding {fid}", severity=severity,
+        description="d", evidence="e", impact="i", remediation=_remediation("Fix."),
+    )
+
+
+class WorstSeverityTests(unittest.TestCase):
+    def _summary_rows(self, result):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        generate(result, path)
+        ws = load_workbook(path)["Executive Summary"]
+        hdr = next(r for r in ws.iter_rows() if r[2].value == "Worst severity")
+        rows = []
+        for r in range(hdr[0].row + 1, ws.max_row + 1):
+            if ws.cell(row=r, column=2).value:
+                rows.append((ws.cell(row=r, column=2).value, ws.cell(row=r, column=3).value,
+                             ws.cell(row=r, column=3).fill.fgColor.rgb))
+        return rows
+
+    def test_worst_severity_and_sorting(self):
+        result = build_result()
+        # Medium-only section listed first, but labelled "Healthy" by the AI.
+        result.domain_analyses = [
+            DomainAnalysis(section_title="Mild", section_id="1", overall_health="Healthy",
+                           findings=[_finding("M-1", "Medium"), _finding("M-2", "Low")]),
+            DomainAnalysis(section_title="Serious", section_id="2", overall_health="Healthy",
+                           findings=[_finding("H-1", "Low"), _finding("H-2", "High")]),
+        ]
+        rows = self._summary_rows(result)
+        self.assertEqual([r[0] for r in rows], ["Serious", "Mild"])
+        self.assertEqual([r[1] for r in rows], ["High", "Medium"])
+        self.assertTrue(rows[1][2].endswith("FFC000"))
+
+    def test_ties_sorted_by_finding_count(self):
+        result = build_result()
+        result.domain_analyses = [
+            DomainAnalysis(section_title="One", section_id="1", overall_health="Warning", findings=[_finding("A-1", "High")]),
+            DomainAnalysis(section_title="Two", section_id="2", overall_health="Warning",
+                           findings=[_finding("B-1", "High"), _finding("B-2", "Low")]),
+        ]
+        self.assertEqual([r[0] for r in self._summary_rows(result)], ["Two", "One"])
 
 
 if __name__ == "__main__":
