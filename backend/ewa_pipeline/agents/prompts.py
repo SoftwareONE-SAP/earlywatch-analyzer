@@ -55,6 +55,16 @@ Focus: {analysis_focus}
 - Return no findings when current, sufficient evidence supports health.
 </analysis_rules>
 
+<finding_fields>
+- evidence: verbatim report quote(s) with values, units and the [RED]/[YELLOW]/[GREEN] token where present. No interpretation.
+- description: interpretation only (meaning, likely cause). Do not restate evidence.
+- confidence: High = report's own rating or explicit value supports it; Medium = inferred from report values plus skill thresholds; Low = heuristic or incomplete data. confidence_reason: one sentence.
+- to_confirm: one concrete check (transaction or report) only if supported; else empty.
+- risk_types: 1-2 of exactly: Security, Availability, Performance, Compliance, Cost, Data integrity, Supportability, Operations. Main first.
+- subject: exact object copied verbatim (SQL statement hash, user, parameter, client, host, component); empty if none.
+- due_date: YYYY-MM-DD only when the report states a date; else empty.
+</finding_fields>
+
 <section_content>
 {content}
 </section_content>
@@ -105,6 +115,15 @@ only and must not produce an extra source result. Return no findings when the ev
 Health: Critical for any Critical finding; Warning for any High or at least three Medium findings;
 otherwise Healthy. Finding IDs are provisional; Python assigns globally unique source-prefixed IDs.
 Do not omit, duplicate, or invent source IDs. Use only report- or skill-supported remediation details.
+
+Finding fields:
+- evidence: verbatim report quote(s) with values, units and the [RED]/[YELLOW]/[GREEN] token where present. No interpretation.
+- description: interpretation only (meaning, likely cause). Do not restate evidence.
+- confidence: High = report's own rating or explicit value supports it; Medium = inferred from report values plus skill thresholds; Low = heuristic or incomplete data. confidence_reason: one sentence.
+- to_confirm: one concrete check (transaction or report) only if supported; else empty.
+- risk_types: 1-2 of exactly: Security, Availability, Performance, Compliance, Cost, Data integrity, Supportability, Operations. Main first.
+- subject: exact object copied verbatim (SQL statement hash, user, parameter, client, host, component); empty if none.
+- due_date: YYYY-MM-DD only when the report states a date; else empty.
 
 Complete owned source content:
 {content}

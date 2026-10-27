@@ -73,6 +73,15 @@ class EwaAnalysisState(TypedDict):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# Finding fields the cross-reference and synthesis calls do not need (saves input tokens).
+_LATER_CALL_EXCLUDED_FINDING_FIELDS = {"confidence_reason", "to_confirm", "due_date"}
+
+
+def _dump_for_later_calls(analysis: DomainAnalysis) -> dict:
+    return analysis.model_dump(
+        exclude={"findings": {"__all__": _LATER_CALL_EXCLUDED_FINDING_FIELDS}}
+    )
+
 def _usage_details(meta: Any, key: str, *detail_keys: str) -> int:
     if isinstance(meta, dict):
         details = meta.get(key) or {}
@@ -305,7 +314,7 @@ def build_ewa_graph(
         if not state["domain_analyses"]:
             return {"cross_references": [], "correlation_failed": True}
         all_findings = {
-            da.section_id: da.model_dump()
+            da.section_id: _dump_for_later_calls(da)
             for da in state["domain_analyses"]
         }
         prompt = CROSS_REFERENCE_PROMPT.format(
@@ -339,7 +348,7 @@ def build_ewa_graph(
             return {"executive_summary": "No section analysis succeeded.", "overall_system_health": "Unknown",
                     "top_5_priority_actions": [], "synthesis_failed": True}
         all_findings_text = json.dumps(
-            [da.model_dump() for da in state["domain_analyses"]], indent=2
+            [_dump_for_later_calls(da) for da in state["domain_analyses"]], indent=2
         )
         cross_refs_text = json.dumps(
             [xr.model_dump() if hasattr(xr, "model_dump") else xr

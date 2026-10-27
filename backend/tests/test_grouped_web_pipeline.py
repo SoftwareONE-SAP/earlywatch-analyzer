@@ -18,8 +18,10 @@ from openpyxl import load_workbook
 from ewa_pipeline.agents import orchestrator
 from ewa_pipeline.agents.runner import AnalysisFailedError
 from ewa_pipeline.report.schemas import (
-    CrossReferenceList, DomainAnalysis, GroupedDomainAnalysis, OrchestratorPlan, SynthesisResult,
+    CrossReferenceList, DomainAnalysis, Finding, GroupedDomainAnalysis, OrchestratorPlan,
+    Remediation, SynthesisResult,
 )
+from ewa_pipeline.agents.prompts import DOMAIN_ANALYST_PROMPT, GROUPED_DOMAIN_ANALYST_PROMPT
 from ewa_pipeline.services.pipeline import run_pipeline
 from test_cli_analysis_settings import configured
 
@@ -30,6 +32,19 @@ HTML = """<article><h1>Database</h1><h2>SQL A</h2>
 
 
 class GroupedWebPipelineTests(unittest.TestCase):
+    @staticmethod
+    def rich_finding():
+        return Finding(
+            id="F001", title="Slow statement", severity="Medium",
+            description="Likely missing index", evidence="[YELLOW] runtime 95 ms",
+            impact="Slower dialog response",
+            remediation=Remediation(action="Check the plan", sap_transactions=["ST05"],
+                                    effort_estimate="Low", priority="Short-term"),
+            confidence="High", confidence_reason="CONF_REASON_MARKER",
+            to_confirm="TO_CONFIRM_MARKER", risk_types=["Performance"],
+            subject="SUBJECT_MARKER_A123", due_date="2026-12-31",
+        )
+
     def run_synthetic(self, directory, *, mode="complete", config=None, planner_fails=False):
         config = config or configured()
         source = Path(directory) / "synthetic.html"
@@ -60,7 +75,8 @@ class GroupedWebPipelineTests(unittest.TestCase):
                 elif mode == "unknown":
                     ids = ["9999"]
                 analyses = [DomainAnalysis(section_id=sid, section_title="Untrusted model title",
-                            findings=[], overall_health="Healthy") for sid in ids]
+                            findings=[self.rich_finding()] if mode == "findings" else [],
+                            overall_health="Warning" if mode == "findings" else "Healthy") for sid in ids]
                 parsed = GroupedDomainAnalysis(analyses=analyses) if schema is GroupedDomainAnalysis else analyses[0]
             elif schema is CrossReferenceList:
                 parsed = CrossReferenceList(items=[])
@@ -161,6 +177,30 @@ class GroupedWebPipelineTests(unittest.TestCase):
         self.assertTrue(result.degraded)
         self.assertEqual(result.overall_system_health, "Unknown")
         self.assertEqual(len(result.domain_analyses), 2)
+
+    def test_analyst_prompts_format_and_carry_finding_field_guidance(self):
+        single = DOMAIN_ANALYST_PROMPT.format(
+            section_title="T", section_id="0001", analysis_focus="F", skill_context="S", content="C")
+        grouped = GROUPED_DOMAIN_ANALYST_PROMPT.format(
+            section_title="T", section_ids="0001", analysis_focus="F", skill_context="S", content="C")
+        for prompt in (single, grouped):
+            for text in ("Security, Availability, Performance, Compliance, Cost, Data integrity, "
+                         "Supportability, Operations", "confidence_reason", "to_confirm",
+                         "subject", "due_date", "YYYY-MM-DD", "verbatim"):
+                self.assertIn(text, prompt)
+
+    def test_later_calls_omit_bulky_finding_fields_but_keep_correlation_fields(self):
+        with TemporaryDirectory() as directory:
+            result, _, _, calls = self.run_synthetic(directory, mode="findings")
+        self.assertTrue(any(f.confidence_reason for a in result.domain_analyses for f in a.findings))
+        later = [prompt for schema, prompt in calls if schema in (CrossReferenceList, SynthesisResult)]
+        self.assertEqual(len(later), 2)
+        for prompt in later:
+            for key in ("confidence_reason", "to_confirm", "due_date",
+                        "CONF_REASON_MARKER", "TO_CONFIRM_MARKER", "2026-12-31"):
+                self.assertNotIn(key, prompt)
+            for key in ('"subject"', "SUBJECT_MARKER_A123", '"risk_types"', '"confidence"'):
+                self.assertIn(key, prompt)
 
 
 if __name__ == "__main__":
