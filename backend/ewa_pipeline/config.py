@@ -63,6 +63,10 @@ class Config(BaseModel):
     max_parent_context_chars: int = Field(default=4000, ge=0)
     decision_model: str = "Decision-1"
     decision_enabled: bool = False
+    decision_keep: float = Field(default=0.9, ge=0, le=1)  # at or above: a confirmed match
+    decision_possible: float = Field(default=0.5, ge=0, le=1)  # at or above: "please check"
+    decision_workers: int = Field(default=8, ge=1)
+    decision_budget_seconds: int = Field(default=300, ge=1)
 
     def model_settings(self, role: Literal["cross_reference", "synthesis"]) -> tuple[str, ReasoningEffort]:
         deployment = getattr(self.azure_openai.deployments, role)
@@ -120,7 +124,8 @@ def _runtime_env() -> dict[str, str]:
         name.lower(): value
         for name in ("REQUEST_TIMEOUT_SECONDS", "PLANNING_TIMEOUT_SECONDS", "MAX_CONCURRENCY",
                      "MAX_TASK_SECTIONS", "MAX_TASK_CONTENT_CHARS", "MAX_PARENT_CONTEXT_CHARS",
-                     "DECISION_MODEL", "DECISION_ENABLED")
+                     "DECISION_MODEL", "DECISION_ENABLED", "DECISION_KEEP", "DECISION_POSSIBLE",
+                     "DECISION_WORKERS", "DECISION_BUDGET_SECONDS")
         if (value := _first_env(name))
     }
 

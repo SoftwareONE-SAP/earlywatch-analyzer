@@ -102,6 +102,23 @@ class DecisionClientTests(unittest.TestCase):
         self.assertEqual(config.decision_model, "Decision-2")
         self.assertFalse(make_config().decision_enabled)
 
+    def test_alert_matching_settings(self):
+        config = make_config()
+        self.assertEqual(
+            (config.decision_keep, config.decision_possible,
+             config.decision_workers, config.decision_budget_seconds),
+            (0.9, 0.5, 8, 300),
+        )
+        env = {"DECISION_KEEP": "0.95", "DECISION_POSSIBLE": "0.6",
+               "DECISION_WORKERS": "2", "DECISION_BUDGET_SECONDS": "60"}
+        with patch.dict(os.environ, env):
+            config = make_config(**_runtime_env())
+        self.assertEqual(
+            (config.decision_keep, config.decision_possible,
+             config.decision_workers, config.decision_budget_seconds),
+            (0.95, 0.6, 2, 60),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
