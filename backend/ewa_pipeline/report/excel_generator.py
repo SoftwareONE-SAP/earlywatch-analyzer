@@ -230,9 +230,13 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     _apply_app_style(ws, zoom=110)
     ws.sheet_properties.tabColor = _HEALTH_BG.get(da.overall_health, _TAB_UTIL)
 
-    COLS = ["ID", "Severity", "Title", "Description", "Evidence",
+    # Columns A (ID) and B (Severity) must stay first: the Executive Summary
+    # counts findings with formulas over those two columns. New columns go last.
+    COLS = ["ID", "Severity", "Title", "Interpretation", "Observed (from report)",
             "Impact", "Action", "Transactions", "Effort", "Priority",
-            "External Validation", "Validation Reason", "Validation Query"]
+            "External Validation", "Validation Reason", "Validation Query",
+            "Confidence", "Risk Type", "To confirm"]
+    wrap_cols = (4, 5, 6, 7, 12, 13, 16)
 
     # Row 1: full-width back-link
     ws.merge_cells(f"A1:{get_column_letter(len(COLS))}1")
@@ -257,11 +261,12 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
             "Required" if f.remediation.external_validation_required else "Not required",
             f.remediation.validation_reason,
             f.remediation.validation_query,
+            f.confidence or "", ", ".join(f.risk_types), f.to_confirm,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(wrap=(col in (4, 5, 6, 7, 12, 13)))
+            c.alignment = _align(wrap=(col in wrap_cols))
 
         if i % 2 == 1:
             for col in range(1, len(COLS) + 1):
@@ -271,6 +276,66 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
         ws.cell(row=r, column=2).fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
         ws.cell(row=r, column=2).font = _font(bold=True, color=_SEV_FG.get(sev, "000000"))
         ws.cell(row=r, column=2).alignment = _align(h="center")
+
+    _autofit_columns(ws, min_width=8, max_width=55)
+
+
+def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
+    """One flat, filterable table of every finding, worst first."""
+    ws = wb.create_sheet("All Findings")
+    _apply_app_style(ws, zoom=110)
+    ws.sheet_properties.tabColor = _TAB_EXEC
+
+    COLS = [
+        "Finding ID", "Section", "Severity", "Risk Type", "Title",
+        "Observed (from report)", "Interpretation", "Confidence",
+        "Why this confidence", "To confirm", "Impact", "Action",
+        "Transactions", "Effort", "Priority", "Due date", "External Validation",
+    ]
+    wrap_cols = (5, 6, 7, 9, 10, 11, 12, 13)
+    _hdr_row(ws, 1, COLS)
+    ws.row_dimensions[1].height = 24
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
+
+    _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    rows: list[tuple] = []
+    for sec_idx, da in enumerate(result.domain_analyses):
+        for f_idx, f in enumerate(da.findings):
+            rows.append((_SEV_ORDER.get(f.severity, 9), sec_idx, f_idx, da, f))
+    rows.sort(key=lambda x: (x[0], x[1], x[2]))
+
+    for i, (_, _, f_idx, da, f) in enumerate(rows):
+        r = 2 + i
+        vals = [
+            f.id, da.section_title, f.severity, ", ".join(f.risk_types), f.title,
+            f.evidence, f.description, f.confidence or "",
+            f.confidence_reason, f.to_confirm, f.impact, f.remediation.action,
+            ", ".join(f.remediation.sap_transactions),
+            f.remediation.effort_estimate, f.remediation.priority, f.due_date,
+            "Required" if f.remediation.external_validation_required else "Not required",
+        ]
+        for col, val in enumerate(vals, 1):
+            c = ws.cell(row=r, column=col, value=val)
+            c.font = _font()
+            c.alignment = _align(v="top", wrap=(col in wrap_cols))
+
+        if i % 2 == 1:
+            for col in range(1, len(COLS) + 1):
+                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
+
+        # Finding ID links to the finding's row on its section sheet.
+        sname = sheet_map.get(da.section_id)
+        if sname:
+            idc = ws.cell(row=r, column=1)
+            idc.hyperlink = f"#'{sname}'!A{3 + f_idx}"
+            idc.font = _font(color=_C_LINK)
+
+        sev = f.severity
+        sc = ws.cell(row=r, column=3)
+        sc.fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
+        sc.font = _font(bold=True, color=_SEV_FG.get(sev, "000000"))
+        sc.alignment = _align(h="center", v="top")
 
     _autofit_columns(ws, min_width=8, max_width=55)
 
@@ -446,7 +511,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = {"Executive Summary", "Cross-References", "Remediation Plan", "Document Structure",
+    used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Remediation Plan", "Document Structure",
                       "Token Usage", "Analysis Tasks", "Source Coverage"}
     for da in result.domain_analyses:
         if not da.findings:
@@ -460,6 +525,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         used.add(name)
 
     _build_executive_summary(wb, result, sheet_map)
+    _build_all_findings(wb, result, sheet_map)
     for da in result.domain_analyses:
         if da.section_id in sheet_map:
             _build_section_sheet(wb, da, sheet_map[da.section_id])
