@@ -157,6 +157,24 @@ class SapServiceSummary(BaseModel):
     checks: list[SapCheck] = Field(default_factory=list)
 
 
+class SystemProfile(BaseModel):
+    """Short "ID card" of the analysed SAP system. Every field is optional."""
+
+    sid: str = ""
+    installation_number: str = ""
+    session_number: str = ""
+    product: str = ""
+    product_version: str = ""
+    database: str = ""
+    database_version: str = ""
+    db_id: str = ""
+    os: str = ""
+    system_role: str = ""
+    period_start: str = ""
+    period_end: str = ""
+    sources: dict[str, str] = Field(default_factory=dict)
+
+
 class AnalysisResult(BaseModel):
     domain_analyses: list[DomainAnalysis]
     cross_references: list[CrossReference]
