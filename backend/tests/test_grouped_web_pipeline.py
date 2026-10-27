@@ -30,6 +30,13 @@ HTML = """<article><h1>Database for TP1</h1><h2>SQL A</h2>
 <p>SQL A runtime 95 ms; statement hash A123.</p><h2>SQL B</h2>
 <p>SQL B runtime 35 ms; statement hash B456.</p></article>"""
 
+SUMMARY_MARKER = "SAP_ALERT_OVERVIEW_MARKER"
+
+
+def html_with_summary(title):
+    return (f"<article><h1>{title}</h1><p>{SUMMARY_MARKER} red alert on SQL.</p>"
+            + HTML.replace("<article>", "", 1))
+
 
 class GroupedWebPipelineTests(unittest.TestCase):
     @staticmethod
@@ -45,10 +52,10 @@ class GroupedWebPipelineTests(unittest.TestCase):
             subject="SUBJECT_MARKER_A123", due_date="2026-12-31",
         )
 
-    def run_synthetic(self, directory, *, mode="complete", config=None, planner_fails=False):
+    def run_synthetic(self, directory, *, mode="complete", config=None, planner_fails=False, html=HTML):
         config = config or configured()
         source = Path(directory) / "synthetic.html"
-        source.write_text(HTML, encoding="utf-8")
+        source.write_text(html, encoding="utf-8")
         output = Path(directory) / "synthetic.xlsx"
         calls = []
         self.last_calls = calls
@@ -136,6 +143,22 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(workbook["Analysis Tasks"]["C2"].value, "0002, 0003")
             self.assertEqual(workbook["Source Coverage"]["A3"].value, "0003")
             workbook.close()
+
+    def test_service_summary_chapter_is_never_sent_to_analysts(self):
+        for title in ("1 Service Summary", "Service Summary"):
+            with self.subTest(title=title), TemporaryDirectory() as directory:
+                result, _, _, calls = self.run_synthetic(
+                    directory, planner_fails=True, html=html_with_summary(title))
+                self.assertFalse(any(SUMMARY_MARKER in prompt for schema, prompt in calls
+                                     if schema in (DomainAnalysis, GroupedDomainAnalysis)))
+                skipped = [c for c in result.coverage if c.status == "skipped"]
+                self.assertEqual([c.section_title for c in skipped], [title])
+                self.assertEqual(skipped[0].reason, "SAP Service Summary — read by Python, see SAP vs Us")
+                self.assertNotIn(skipped[0].section_id,
+                                 [sid for t in result.analysis_tasks for sid in t.source_section_ids])
+                self.assertNotIn(skipped[0].section_id,
+                                 [sid for t in result.analysis_tasks for sid in t.context_section_ids])
+                self.assertEqual(sorted(c.status for c in result.coverage), ["analyzed", "analyzed", "skipped"])
 
     def test_portal_count_limit_splits_shared_task(self):
         config = configured().model_copy(update={"max_task_sections": 1, "max_parent_context_chars": 0})

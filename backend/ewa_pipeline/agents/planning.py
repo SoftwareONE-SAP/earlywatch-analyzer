@@ -1,11 +1,25 @@
 """Hierarchy-aware task grouping; source sections remain the coverage units."""
 from __future__ import annotations
 
+import re
+
 from bs4 import BeautifulSoup
 
 from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import TreeNode, flatten_tree
 from ewa_pipeline.report.schemas import OrchestratorPlan
+
+
+# SAP's own "Service Summary" chapter holds SAP's verdicts (Alert/Check Overview).
+# Python reads it exactly (indexer/sap_summary.py), so the AI must not re-analyse it.
+SAP_SUMMARY_TITLE = "service summary"
+SAP_SUMMARY_SKIP_REASON = "SAP Service Summary — read by Python, see SAP vs Us"
+
+
+def is_sap_summary_section(node: TreeNode) -> bool:
+    """True for the top-level chapter, numbered ("1 Service Summary") or not."""
+    title = re.sub(r"^[\d.\s]+", "", node.title or "").strip().lower()
+    return node.level == 0 and title == SAP_SUMMARY_TITLE
 
 
 def prepare_sections(tree: dict, sections: list[TreeNode], content: dict[str, str]):
@@ -34,7 +48,8 @@ def parent_context(section_ids: list[str], sections: list[dict], contexts: dict[
     for sid in section_ids:
         # Prefer immediate parents over distant front matter.
         for ancestor in reversed(lookup[sid].get("ancestor_ids", [])):
-            if ancestor not in section_ids and ancestor not in candidates:
+            # Ancestors without an excerpt (e.g. the excluded Service Summary) are not re-injected.
+            if ancestor in contexts and ancestor not in section_ids and ancestor not in candidates:
                 candidates.append(ancestor)
     parts, included = [], []
     remaining = limit
