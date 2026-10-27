@@ -51,6 +51,16 @@ class CleanEvidenceTests(unittest.TestCase):
     def test_image_lines_dropped(self) -> None:
         self.assertNotIn("[IMAGE]", self.cleaned)
 
+    def test_labelled_image_placeholder_dropped(self) -> None:
+        self.assertEqual(
+            "Load is high [RED]",
+            clean_evidence('Load is high [RED]\nRelated sources 0153 and 0158: "[IMAGE]"'),
+        )
+
+    def test_image_placeholder_next_to_text_kept(self) -> None:
+        line = 'Chart: "[IMAGE]" shows 80% CPU'
+        self.assertEqual(line, clean_evidence(line))
+
     def test_header_text_kept(self) -> None:
         self.assertIn("columns: Statement Hash; Total Elapsed Time [s]", self.cleaned)
         self.assertIn("Thread State; Area; Samples:", self.cleaned)

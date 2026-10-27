@@ -136,6 +136,7 @@ _ROW_RE = re.compile(_ROW, re.IGNORECASE | re.DOTALL)
 _CELL_RE = re.compile(r"<t[dh](?:\s[^>]*)?>(.*?)</t[dh]\s*>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
 _ID_PREFIX_RE = re.compile(r"^\s*\d{4}\s*[,:]\s*")
+_IMAGE_LINE_RE = re.compile(r"^\s*(?:[^:]*:\s*)?[\"'“”]?\[IMAGE\][\"'“”]?\s*$")
 
 
 def clean_evidence(text: str) -> str:
@@ -157,7 +158,7 @@ def clean_evidence(text: str) -> str:
     lines: list[str] = []
     for raw in text.splitlines():
         line = _ID_PREFIX_RE.sub("", raw.rstrip(), count=1).rstrip()
-        if line.strip().strip("\"'").strip() == "[IMAGE]":
+        if line.strip().strip("\"'").strip() == "[IMAGE]" or _IMAGE_LINE_RE.match(line):
             continue
         if not line.strip() and (not lines or not lines[-1]):
             continue
