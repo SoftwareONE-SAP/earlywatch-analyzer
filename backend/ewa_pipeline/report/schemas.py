@@ -35,6 +35,56 @@ class Finding(BaseModel):
     evidence: str
     impact: str
     remediation: Remediation
+    confidence: Literal["High", "Medium", "Low"] | None = Field(
+        default=None,
+        description=(
+            "How well the report supports this finding. High = the report's own rating "
+            "or an explicit value supports it. Medium = inferred from report values plus "
+            "skill thresholds. Low = heuristic or incomplete data."
+        ),
+    )
+    confidence_reason: str = Field(
+        default="",
+        description="One sentence on why this confidence level was chosen.",
+    )
+    to_confirm: str = Field(
+        default="",
+        description=(
+            "One concrete check a Basis engineer should run to confirm the finding "
+            "(for example a transaction or report). Only if the report supports one; "
+            "otherwise leave empty."
+        ),
+    )
+    risk_types: list[
+        Literal[
+            "Security",
+            "Availability",
+            "Performance",
+            "Compliance",
+            "Cost",
+            "Data integrity",
+            "Supportability",
+            "Operations",
+        ]
+    ] = Field(
+        default_factory=list,
+        description="1 or 2 risk types, the main one first.",
+    )
+    subject: str = Field(
+        default="",
+        description=(
+            "The exact object the finding is about, copied verbatim from the report "
+            "(SQL statement hash, user name, parameter, client, host, component). "
+            "Empty if there is none."
+        ),
+    )
+    due_date: str = Field(
+        default="",
+        description=(
+            "Date as YYYY-MM-DD, only when the report itself states a date "
+            "(for example end of maintenance). Otherwise empty."
+        ),
+    )
 
 
 class DomainAnalysis(BaseModel):
