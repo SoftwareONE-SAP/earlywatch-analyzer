@@ -138,6 +138,25 @@ class SynthesisResult(BaseModel):
     top_5_priority_actions: list[str]
 
 
+class SapAlert(BaseModel):
+    """One row of SAP's own "Alert Overview" table."""
+    rating: str  # plain uppercase word, e.g. "RED"
+    text: str
+
+
+class SapCheck(BaseModel):
+    """One row of SAP's own "Check Overview" table (topic or subtopic)."""
+    topic: str
+    subtopic: str = ""
+    rating: str  # plain uppercase word, e.g. "YELLOW"
+    raw_title: str
+
+
+class SapServiceSummary(BaseModel):
+    alerts: list[SapAlert] = Field(default_factory=list)
+    checks: list[SapCheck] = Field(default_factory=list)
+
+
 class AnalysisResult(BaseModel):
     domain_analyses: list[DomainAnalysis]
     cross_references: list[CrossReference]
