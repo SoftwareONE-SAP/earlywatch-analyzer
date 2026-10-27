@@ -61,6 +61,8 @@ class Config(BaseModel):
     max_task_sections: int = Field(default=12, ge=1)
     max_task_content_chars: int = Field(default=48000, ge=1)
     max_parent_context_chars: int = Field(default=4000, ge=0)
+    decision_model: str = "Decision-1"
+    decision_enabled: bool = False
 
     def model_settings(self, role: Literal["cross_reference", "synthesis"]) -> tuple[str, ReasoningEffort]:
         deployment = getattr(self.azure_openai.deployments, role)
@@ -117,7 +119,8 @@ def _runtime_env() -> dict[str, str]:
     return {
         name.lower(): value
         for name in ("REQUEST_TIMEOUT_SECONDS", "PLANNING_TIMEOUT_SECONDS", "MAX_CONCURRENCY",
-                     "MAX_TASK_SECTIONS", "MAX_TASK_CONTENT_CHARS", "MAX_PARENT_CONTEXT_CHARS")
+                     "MAX_TASK_SECTIONS", "MAX_TASK_CONTENT_CHARS", "MAX_PARENT_CONTEXT_CHARS",
+                     "DECISION_MODEL", "DECISION_ENABLED")
         if (value := _first_env(name))
     }
 
