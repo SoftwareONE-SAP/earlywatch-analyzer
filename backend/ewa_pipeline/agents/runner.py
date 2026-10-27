@@ -35,6 +35,7 @@ def run_analysis(
     cost_tracker: CostTracker,
     verbose: bool = False,
     progress_callback: ProgressCallback | None = None,
+    system_profile: str = "",
 ) -> AnalysisResult:
     """
     Run the full LangGraph EWA analysis pipeline.
@@ -65,6 +66,7 @@ def run_analysis(
         "sections_content": sections_content,
         "context_sections": context_sections,
         "skills_catalog": skills_catalog,
+        "system_profile": system_profile,
         "section_tasks": [],
         "planning_notes": "",
         "analysis_tasks": [],

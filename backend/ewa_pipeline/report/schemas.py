@@ -186,3 +186,5 @@ class AnalysisResult(BaseModel):
     coverage: list[SectionCoverage] = Field(default_factory=list)
     degraded: bool = False
     warnings: list[str] = Field(default_factory=list)
+    system_profile: SystemProfile | None = None
+    sap_summary: SapServiceSummary | None = None

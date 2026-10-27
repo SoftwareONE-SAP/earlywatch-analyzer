@@ -75,6 +75,11 @@ class SchemaCompatTests(unittest.TestCase):
         self.assertEqual(finding.id, "F-001")
         self.assert_defaults(finding)
 
+    def test_old_payload_without_profile_or_sap_summary_loads_with_none(self):
+        result = AnalysisResult.model_validate(old_payload())
+        self.assertIsNone(result.system_profile)
+        self.assertIsNone(result.sap_summary)
+
     def test_old_payload_loads_from_json_string_with_defaults(self):
         result = AnalysisResult.model_validate_json(json.dumps(old_payload()))
         self.assert_defaults(result.domain_analyses[0].findings[0])

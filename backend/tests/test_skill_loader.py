@@ -72,6 +72,7 @@ class SkillLoaderTests(unittest.TestCase):
         domain_prompt = DOMAIN_ANALYST_PROMPT.format(
             section_title="SAP Memory",
             section_id="001",
+            system_profile="Not available.",
             analysis_focus="Check memory thresholds",
             skill_context=skill_context,
             content="Extended memory utilization is 97%.",

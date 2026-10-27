@@ -17,7 +17,7 @@ import html
 import json
 import operator
 import re
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -52,6 +52,7 @@ class EwaAnalysisState(TypedDict):
     sections_content: dict[str, str]     # section_id to source content
     context_sections: dict[str, str]
     skills_catalog: str
+    system_profile: NotRequired[str]     # short system ID card text for analyst prompts
 
     # After planner node
     section_tasks: list[dict]            # grouped source IDs, budgets, context
@@ -295,13 +296,15 @@ def build_ewa_graph(
         if not state["section_tasks"]:
             return "cross_reference"
         lookup = {s["id"]: s for s in state["sections_available"]}
-        return [Send("domain_analyst", {**task, "sources": [
+        profile = state.get("system_profile", "")
+        return [Send("domain_analyst", {**task, "system_profile": profile, "sources": [
             {"id": sid, "title": lookup[sid]["title"], "content": state["sections_content"][sid]}
             for sid in task["section_ids"]]}) for task in state["section_tasks"]]
 
     def domain_analyst(task: dict) -> dict:
         """One bounded invocation; preserve each source's identity and full content."""
         sources = task["sources"]
+        profile_text = task.get("system_profile") or "Not available."
         references = task.get("reference_ids") or skill_registry.suggest_references(
             task["skill_name"], " ".join([task["section_title"], task["analysis_focus"],
                 *[s["title"] + " " + s["content"][:100] for s in sources]]))
@@ -314,14 +317,16 @@ def build_ewa_graph(
             if len(sources) == 1:
                 source = sources[0]
                 prompt = DOMAIN_ANALYST_PROMPT.format(section_title=source["title"], section_id=source["id"],
-                    content=source["content"], skill_context=context, analysis_focus=task["analysis_focus"])
+                    content=source["content"], skill_context=context, analysis_focus=task["analysis_focus"],
+                    system_profile=profile_text)
                 chain = domain_chain
             else:
                 source_text = "\n\n".join(
                     f"Source Section ID: {s['id']}\nSource title: {s['title']}\n{s['content']}" for s in sources)
                 prompt = GROUPED_DOMAIN_ANALYST_PROMPT.format(section_title=task["section_title"],
                     section_ids=", ".join(task["section_ids"]), content=source_text,
-                    skill_context=context, analysis_focus=task["analysis_focus"])
+                    skill_context=context, analysis_focus=task["analysis_focus"],
+                    system_profile=profile_text)
                 chain = grouped_chain
             if task["parent_context"]:
                 prompt += "\n\nSupplementary parent context (excerpts; not owned source sections):\n" + task["parent_context"]

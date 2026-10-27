@@ -26,7 +26,7 @@ from ewa_pipeline.services.pipeline import run_pipeline
 from test_cli_analysis_settings import configured
 
 
-HTML = """<article><h1>Database</h1><h2>SQL A</h2>
+HTML = """<article><h1>Database for TP1</h1><h2>SQL A</h2>
 <p>SQL A runtime 95 ms; statement hash A123.</p><h2>SQL B</h2>
 <p>SQL B runtime 35 ms; statement hash B456.</p></article>"""
 
@@ -66,6 +66,8 @@ class GroupedWebPipelineTests(unittest.TestCase):
                 if not ids:
                     ids = re.findall(r"^ID: (\d+)", prompt, re.MULTILINE)
                 self.assertTrue(ids)
+                self.assertIn("<system_profile>", prompt)
+                self.assertIn("System ID: TP1", prompt)
                 if mode == "exception":
                     raise RuntimeError("synthetic provider payload must never escape")
                 if mode == "missing":
@@ -117,6 +119,12 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(len(grouped), 1)
             self.assertIn("A123", grouped[0])
             self.assertIn("B456", grouped[0])
+            self.assertIsNotNone(result.system_profile)
+            self.assertEqual(result.system_profile.sid, "TP1")
+            self.assertIsNotNone(result.sap_summary)
+            persisted_early = json.loads(artifacts.result_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted_early["system_profile"]["sid"], "TP1")
+            self.assertIn("sap_summary", persisted_early)
             self.assertEqual(tracker._entries["phase1_domain_analysis"].calls, 1)
             self.assertEqual(tracker._entries["phase1_domain_analysis"].input_tokens, 100)
             self.assertEqual(result.token_usage.phase1_cache_write_tokens, 5)
@@ -137,6 +145,10 @@ class GroupedWebPipelineTests(unittest.TestCase):
         self.assertTrue(all(task.context_content_chars == 0 for task in result.analysis_tasks))
         self.assertEqual(tracker._entries["phase1_domain_analysis"].calls, 2)
         self.assertFalse(any(schema is GroupedDomainAnalysis for schema, _ in calls))
+        single = [prompt for schema, prompt in calls if schema is DomainAnalysis]
+        self.assertEqual(len(single), 2)
+        self.assertTrue(all("<system_profile>" in prompt and "System ID: TP1" in prompt
+                            for prompt in single))
 
     def test_planner_failure_falls_back_to_related_hierarchy_group(self):
         with TemporaryDirectory() as directory:
@@ -180,9 +192,11 @@ class GroupedWebPipelineTests(unittest.TestCase):
 
     def test_analyst_prompts_format_and_carry_finding_field_guidance(self):
         single = DOMAIN_ANALYST_PROMPT.format(
-            section_title="T", section_id="0001", analysis_focus="F", skill_context="S", content="C")
+            section_title="T", section_id="0001", analysis_focus="F", skill_context="S", content="C",
+            system_profile="")
         grouped = GROUPED_DOMAIN_ANALYST_PROMPT.format(
-            section_title="T", section_ids="0001", analysis_focus="F", skill_context="S", content="C")
+            section_title="T", section_ids="0001", analysis_focus="F", skill_context="S", content="C",
+            system_profile="")
         for prompt in (single, grouped):
             for text in ("Security, Availability, Performance, Compliance, Cost, Data integrity, "
                          "Supportability, Operations", "confidence_reason", "to_confirm",

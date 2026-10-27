@@ -33,6 +33,11 @@ DOMAIN_ANALYST_PROMPT = """<objective>
 Analyze one SAP EWA section and return the supplied structured output type.
 </objective>
 
+<system_profile>
+{system_profile}
+Use the role to judge exposure. If the role is empty, do not assume production.
+</system_profile>
+
 <section>
 Title: {section_title}
 ID: {section_id}
@@ -100,6 +105,12 @@ Identify supported cross-domain relationships among the supplied EWA findings.
 
 
 GROUPED_DOMAIN_ANALYST_PROMPT = """Review the related EWA sources together using the supplied skill context.
+
+<system_profile>
+{system_profile}
+Use the role to judge exposure. If the role is empty, do not assume production.
+</system_profile>
+
 Group: {section_title}
 Owned source IDs: {section_ids}
 Focus: {analysis_focus}
