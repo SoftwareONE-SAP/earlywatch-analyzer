@@ -11,6 +11,7 @@ from ewa_pipeline.agents.runner import run_analysis
 from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections
 from ewa_pipeline.report import excel_generator
+from ewa_pipeline.report.reconciliation import reconcile
 from ewa_pipeline.indexer.sap_summary import extract_service_summary
 from ewa_pipeline.indexer.system_profile import extract_system_profile, profile_to_prompt_text
 from ewa_pipeline.report.schemas import AnalysisResult, SapServiceSummary, SystemProfile
@@ -87,6 +88,7 @@ def run_pipeline(
         result = AnalysisResult.model_validate_json(result_path.read_text(encoding="utf-8"))
         result.system_profile = system_profile
         result.sap_summary = sap_summary
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
     else:
         reporter.emit(
             "analyzing_sections",
@@ -109,6 +111,7 @@ def run_pipeline(
         )
         result.system_profile = system_profile
         result.sap_summary = sap_summary
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
         result_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
     reporter.emit("generating_excel", "running", "Generating Excel workbook")
@@ -138,6 +141,15 @@ def run_pipeline(
         doc_name=doc_name,
     )
     return result, cost_tracker, artifacts
+
+
+def _reconcile_safely(result, sap_summary, tree, system_profile) -> list:
+    """Compare our findings with SAP's ratings. Never breaks an analysis."""
+    try:
+        return reconcile(result, sap_summary, tree, system_profile)
+    except Exception as exc:
+        logger.warning("SAP reconciliation failed: %s", exc)
+        return []
 
 
 def _read_report_facts(compact_path: Path) -> tuple[SystemProfile | None, SapServiceSummary | None]:

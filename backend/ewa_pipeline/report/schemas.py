@@ -175,6 +175,22 @@ class SystemProfile(BaseModel):
     sources: dict[str, str] = Field(default_factory=dict)
 
 
+class ReconciliationRow(BaseModel):
+    """One SAP alert or check compared with what we found (built by Python, no AI)."""
+
+    source: Literal["Alert", "Check"]
+    sap_topic: str = ""
+    sap_item: str = ""
+    sap_rating: str = ""
+    our_section_id: str = ""
+    our_section_title: str = ""
+    our_rating: str = ""  # RED / YELLOW / GREEN, or "" when not covered
+    finding_ids: list[str] = Field(default_factory=list)
+    verdict: str = ""
+    reason: str = ""
+    match_score: float | None = None  # alerts only
+
+
 class AnalysisResult(BaseModel):
     domain_analyses: list[DomainAnalysis]
     cross_references: list[CrossReference]
@@ -188,3 +204,4 @@ class AnalysisResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     system_profile: SystemProfile | None = None
     sap_summary: SapServiceSummary | None = None
+    reconciliation: list[ReconciliationRow] = Field(default_factory=list)
