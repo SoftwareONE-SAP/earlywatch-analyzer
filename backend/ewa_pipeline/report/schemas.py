@@ -189,6 +189,7 @@ class ReconciliationRow(BaseModel):
     verdict: str = ""
     reason: str = ""
     match_score: float | None = None  # alerts only
+    match_method: str = ""  # alerts only: "Decision-1", "Word overlap", or "" when not matched
 
 
 class AnalysisResult(BaseModel):

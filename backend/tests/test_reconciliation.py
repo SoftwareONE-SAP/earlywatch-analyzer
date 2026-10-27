@@ -148,6 +148,7 @@ class AlertRowTests(unittest.TestCase):
         self.assertEqual(row.our_section_id, "0002")
         self.assertEqual(row.our_rating, "RED")
         self.assertEqual(row.verdict, "We rated higher")
+        self.assertEqual(row.match_method, "Word overlap")
 
     def test_title_only_score_rescues_long_evidence(self):
         self.result.domain_analyses[0].findings[0].evidence = " ".join(f"word{i}" for i in range(60))
@@ -159,6 +160,82 @@ class AlertRowTests(unittest.TestCase):
         self.assertEqual(row.verdict, "Not covered")
         self.assertEqual(row.finding_ids, [])
         self.assertEqual(row.our_rating, "")
+        self.assertEqual(row.match_method, "")
+
+
+class DecisionAlertTests(unittest.TestCase):
+    """Decision-1 scores are passed in; nothing here touches the network."""
+
+    def setUp(self):
+        self.result = make_result(
+            [
+                analysis("0002", finding("F-1", "High", "Standard users retain default passwords")),
+                analysis("0003", finding("F-2", "Medium", "Backup catalog is not maintained"),
+                         finding("F-3", "Low", "Backup catalog size is growing")),
+            ],
+            [cover("0002"), cover("0003")],
+        )
+
+    def run_alert(self, text, scores, rating="RED", **kwargs):
+        summary = SapServiceSummary(alerts=[SapAlert(rating=rating, text=text)])
+        return reconcile(self.result, summary, TREE, PROFILE, alert_scores={0: scores}, **kwargs)[0]
+
+    def test_no_scores_is_word_overlap_only(self):
+        summary = SapServiceSummary(alerts=[
+            SapAlert(rating="RED", text="Standard users have default password."),
+            SapAlert(rating="RED", text="Something unrelated entirely"),
+        ])
+        for scores in (None, {}, {1: {}}):
+            rows = reconcile(self.result, summary, TREE, PROFILE, alert_scores=scores)
+            self.assertEqual([r.match_method for r in rows], ["Word overlap", ""])
+            self.assertEqual(rows[0].reason, "We raised F-1 (High) 'Standard users retain default passwords'")
+            self.assertEqual(rows[1].reason, "No finding matches this alert")
+
+    def test_keep_band_rescues_a_word_overlap_miss(self):
+        row = self.run_alert("Backups are stale", {"F-1": 0.1, "F-2": 0.99, "F-3": 0.3})
+        self.assertEqual(row.match_method, "Decision-1")
+        self.assertEqual(row.finding_ids, ["F-2"])
+        self.assertEqual(row.our_section_id, "0003")
+        self.assertEqual(row.our_rating, "YELLOW")
+        self.assertEqual(row.verdict, "We rated lower")
+        self.assertEqual(row.reason, "Decision-1 match (p=0.99): We raised F-2 (Medium) 'Backup catalog is not maintained'")
+
+    def test_keep_band_overrides_a_wrong_word_overlap_match(self):
+        row = self.run_alert("Standard users have default password.", {"F-1": 0.2, "F-2": 0.95})
+        self.assertEqual((row.match_method, row.finding_ids), ("Decision-1", ["F-2"]))
+
+    def test_close_runner_up_is_noted_only(self):
+        row = self.run_alert("Backups are stale", {"F-2": 0.99, "F-3": 0.97, "F-1": 0.1})
+        self.assertEqual(row.finding_ids, ["F-2"])
+        self.assertTrue(row.reason.endswith("; also close, please check: F-3 'Backup catalog size is growing' (p=0.97)"))
+        far = self.run_alert("Backups are stale", {"F-2": 0.99, "F-3": 0.90})
+        self.assertNotIn("also close", far.reason)
+        low = self.run_alert("Backups are stale", {"F-2": 0.52, "F-3": 0.50}, keep=0.5, possible=0.6)
+        self.assertNotIn("also close", low.reason)
+
+    def test_possible_band_keeps_word_overlap_row(self):
+        row = self.run_alert("Standard users have default password.", {"F-1": 0.6, "F-2": 0.1})
+        self.assertEqual(row.match_method, "Word overlap")
+        self.assertEqual(row.verdict, "Agree")
+        self.assertEqual(row.reason, "We raised F-1 (High) 'Standard users retain default passwords'; "
+                                     "Decision-1 possible match, please check: F-1 'Standard users retain default passwords' (p=0.60)")
+
+    def test_possible_band_without_word_overlap_stays_not_covered(self):
+        row = self.run_alert("Backups are stale", {"F-2": 0.7})
+        self.assertEqual((row.verdict, row.match_method, row.finding_ids), ("Not covered", "", []))
+        self.assertEqual(row.reason, "No confirmed match. Possible match, please check: "
+                                     "F-2 'Backup catalog is not maintained' (p=0.70)")
+
+    def test_below_possible_flags_a_word_overlap_match(self):
+        row = self.run_alert("Standard users have default password.", {"F-1": 0.2, "F-2": 0.1})
+        self.assertEqual(row.match_method, "Word overlap")
+        self.assertTrue(row.reason.endswith("; Decision-1 did not confirm this match"))
+        miss = self.run_alert("Backups are stale", {"F-1": 0.2})
+        self.assertEqual((miss.verdict, miss.reason), ("Not covered", "No finding matches this alert"))
+
+    def test_unknown_finding_ids_are_ignored(self):
+        row = self.run_alert("Backups are stale", {"GONE": 0.99})
+        self.assertEqual((row.verdict, row.match_method), ("Not covered", ""))
 
 
 class EdgeCaseTests(unittest.TestCase):
