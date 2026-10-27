@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import csv
+import json
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from click.testing import CliRunner
+
 from ewa_pipeline.agents.decision_client import decide
+from ewa_pipeline.main import cli
 from ewa_pipeline.report import alert_match_trial as T
 from test_decision_client import FakePost, make_config, ok
 
@@ -142,6 +147,60 @@ class TrialTests(unittest.TestCase):
         self.assertIn("System Replication", body["state"]["sap_alert"]["text"])
         self.assertTrue(body["state"]["finding"]["evidence"].startswith("xxx"))
         self.assertEqual(body["questions"]["answer"]["instructions"], T.QUESTION)
+
+
+class CommandTests(unittest.TestCase):
+    def run_cmd(self, args):
+        config = make_config()
+        with patch("ewa_pipeline.main._load_env_and_config", return_value=config):
+            return CliRunner().invoke(cli, ["alert-trial", *args])
+
+    def test_run_then_reuse_with_labels(self):
+        calls = []
+
+        def fake_decide(question, options, context, *, config, **kw):
+            calls.append(1)
+            self.assertTrue(config.decision_enabled)
+            return fake_ask(question, options, context)
+
+        with TemporaryDirectory() as tmp:
+            result_path, prefix = Path(tmp) / "r.json", str(Path(tmp) / "out")
+            result_path.write_text(json.dumps(make_result()), encoding="utf-8")
+            with patch("ewa_pipeline.agents.decision_client.decide", fake_decide):
+                res = self.run_cmd(["--result", str(result_path), "--out-prefix", prefix])
+                self.assertEqual(res.exit_code, 0, res.output)
+                self.assertEqual(len(calls), 9)
+                for suffix in ("_d1_scores.json", "_alert_pairs.csv", "_alert_summary.csv"):
+                    self.assertTrue(Path(prefix + suffix).exists(), suffix)
+
+                summary = Path(prefix + "_alert_summary.csv")
+                with open(summary, encoding="utf-8-sig") as f:
+                    rows = list(csv.DictReader(f))
+                rows[0]["correct_finding_ids"] = "S-1"
+                with open(summary, "w", newline="", encoding="utf-8-sig") as f:
+                    w = csv.DictWriter(f, fieldnames=T.SUMMARY_COLUMNS)
+                    w.writeheader()
+                    w.writerows(rows)
+
+                calls.clear()
+                res = self.run_cmd(["--result", str(result_path), "--out-prefix", prefix,
+                                    "--reuse-scores", "--labels", str(summary)])
+            self.assertEqual(res.exit_code, 0, res.output)
+            self.assertEqual(calls, [])
+            self.assertIn("Scoreboard", res.output)
+            # the labelled file was backed up before the new summary was written
+            backups = list(Path(tmp).glob("out_alert_summary_labelled_backup_*.csv"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(T.read_labels(backups[0]), {1: {"S-1"}})
+
+    def test_all_calls_failed_exits_non_zero(self):
+        with TemporaryDirectory() as tmp:
+            result_path = Path(tmp) / "r.json"
+            result_path.write_text(json.dumps(make_result()), encoding="utf-8")
+            with patch("ewa_pipeline.agents.decision_client.decide", lambda *a, **k: {}):
+                res = self.run_cmd(["--result", str(result_path), "--out-prefix", str(Path(tmp) / "o")])
+            self.assertNotEqual(res.exit_code, 0)
+            self.assertIn("every call failed", res.output.lower())
 
 
 if __name__ == "__main__":
