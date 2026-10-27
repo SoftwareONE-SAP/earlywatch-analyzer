@@ -6,9 +6,9 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ewa_pipeline.agents.planning import prepare_sections, validate_plan, parent_context, planning_catalogue
+from ewa_pipeline.agents.planning import is_sap_summary_section, prepare_sections, validate_plan, parent_context, planning_catalogue
 from ewa_pipeline.config import Config
-from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections
+from ewa_pipeline.indexer.tree_navigator import TreeNode, get_analyzable_sections
 from ewa_pipeline.report.schemas import OrchestratorPlan, SectionPlanItem
 from test_cli_analysis_settings import configured
 CONFIG = configured()
@@ -92,6 +92,19 @@ class GroupingTests(unittest.TestCase):
         self.assertIn("Database parent metric 95%", text)
         self.assertEqual(ids, ["0001"])
         self.assertNotIn("0001", tasks[1]["section_ids"])
+
+
+
+class ServiceSummaryMatchTests(unittest.TestCase):
+    def test_title_match_is_numbering_and_case_insensitive_top_level_only(self):
+        for title in ("1 Service Summary", "Service Summary", " 1. service summary "):
+            self.assertTrue(is_sap_summary_section(TreeNode(id="1", title=title)), title)
+        self.assertFalse(is_sap_summary_section(TreeNode(id="1", title="Service Summary", level=1)))
+        self.assertFalse(is_sap_summary_section(TreeNode(id="1", title="3 Service Data Quality")))
+
+    def test_ancestor_without_context_is_not_injected(self):
+        sections = [{"id": "0003", "ancestor_ids": ["0002"]}]
+        self.assertEqual(parent_context(["0003"], sections, {}, 200), ("", []))
 
 
 if __name__ == "__main__":

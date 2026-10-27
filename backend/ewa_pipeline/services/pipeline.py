@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,11 +11,15 @@ from ewa_pipeline.agents.runner import run_analysis
 from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections
 from ewa_pipeline.report import excel_generator
-from ewa_pipeline.report.schemas import AnalysisResult
+from ewa_pipeline.report.reconciliation import reconcile
+from ewa_pipeline.indexer.sap_summary import extract_service_summary
+from ewa_pipeline.indexer.system_profile import extract_system_profile, profile_to_prompt_text
+from ewa_pipeline.report.schemas import AnalysisResult, SapServiceSummary, SystemProfile
 from ewa_pipeline.tracking.cost_tracker import CostTracker
 from .progress import ProgressCallback, ProgressReporter
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -51,19 +56,21 @@ def run_pipeline(
     input_path = Path(input_path)
     input_suffix = input_path.suffix.lower()
     if input_suffix in {".htm", ".html"}:
-        tree, pages, doc_name, tree_path, sections = _prepare_html_input(
+        tree, pages, doc_name, tree_path, sections, compact_path = _prepare_html_input(
             html_path=input_path,
             skip_index=skip_index,
             reporter=reporter,
         )
     elif input_suffix == ".doc":
-        tree, pages, doc_name, tree_path, sections = _prepare_doc_input(
+        tree, pages, doc_name, tree_path, sections, compact_path = _prepare_doc_input(
             doc_path=input_path,
             skip_index=skip_index,
             reporter=reporter,
         )
     else:
         raise ValueError(f"Unsupported input type: {input_suffix}")
+
+    system_profile, sap_summary = _read_report_facts(compact_path)
 
     if skip_analysis and result_path.exists():
         reporter.emit(
@@ -79,6 +86,9 @@ def run_pipeline(
             detail=result_path.name,
         )
         result = AnalysisResult.model_validate_json(result_path.read_text(encoding="utf-8"))
+        result.system_profile = system_profile
+        result.sap_summary = sap_summary
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
     else:
         reporter.emit(
             "analyzing_sections",
@@ -97,7 +107,11 @@ def run_pipeline(
             cost_tracker=cost_tracker,
             verbose=verbose,
             progress_callback=progress_callback,
+            system_profile=profile_to_prompt_text(system_profile) if system_profile else "",
         )
+        result.system_profile = system_profile
+        result.sap_summary = sap_summary
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
         result_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
     reporter.emit("generating_excel", "running", "Generating Excel workbook")
@@ -129,6 +143,34 @@ def run_pipeline(
     return result, cost_tracker, artifacts
 
 
+def _reconcile_safely(result, sap_summary, tree, system_profile) -> list:
+    """Compare our findings with SAP's ratings. Never breaks an analysis."""
+    try:
+        return reconcile(result, sap_summary, tree, system_profile)
+    except Exception as exc:
+        logger.warning("SAP reconciliation failed: %s", exc)
+        return []
+
+
+def _read_report_facts(compact_path: Path) -> tuple[SystemProfile | None, SapServiceSummary | None]:
+    """Parse the system profile and SAP's own summary once. Never breaks an analysis."""
+    try:
+        compact_html = compact_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not read compact HTML for profile and SAP summary: %s", exc)
+        return None, None
+    profile = summary = None
+    try:
+        profile = extract_system_profile(compact_html)
+    except Exception as exc:
+        logger.warning("System profile extraction failed: %s", exc)
+    try:
+        summary = extract_service_summary(compact_html)
+    except Exception as exc:
+        logger.warning("SAP service summary extraction failed: %s", exc)
+    return profile, summary
+
+
 def _default_skills_dir() -> Path:
     """Resolve skills directory relative to this package."""
     # backend/ewa_pipeline/services/pipeline.py → backend/skills
@@ -141,7 +183,7 @@ def _prepare_html_input(
     html_path: Path,
     skip_index: bool,
     reporter: ProgressReporter,
-) -> tuple[dict, dict[int, str], str, Path, list]:
+) -> tuple[dict, dict[int, str], str, Path, list, Path]:
     """Prepare pipeline input from compact semantic HTML."""
     from ewa_pipeline.indexer.html_tree_builder import build_document_tree_from_html
 
@@ -172,7 +214,7 @@ def _prepare_html_input(
         current=len(sections),
         total=len(sections) or 1,
     )
-    return tree, {}, html_path.stem, tree_path, sections
+    return tree, {}, html_path.stem, tree_path, sections, html_path
 
 
 def _prepare_doc_input(
@@ -180,7 +222,7 @@ def _prepare_doc_input(
     doc_path: Path,
     skip_index: bool,
     reporter: ProgressReporter,
-) -> tuple[dict, dict[int, str], str, Path, list]:
+) -> tuple[dict, dict[int, str], str, Path, list, Path]:
     """Convert Word/Word XML to compact HTML, then prepare HTML input."""
     from converters.compact_html_converter import convert_html_to_compact_html
     from converters.doc_html_converter import convert_doc_to_html

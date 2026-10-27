@@ -35,6 +35,56 @@ class Finding(BaseModel):
     evidence: str
     impact: str
     remediation: Remediation
+    confidence: Literal["High", "Medium", "Low"] | None = Field(
+        default=None,
+        description=(
+            "How well the report supports this finding. High = the report's own rating "
+            "or an explicit value supports it. Medium = inferred from report values plus "
+            "skill thresholds. Low = heuristic or incomplete data."
+        ),
+    )
+    confidence_reason: str = Field(
+        default="",
+        description="One sentence on why this confidence level was chosen.",
+    )
+    to_confirm: str = Field(
+        default="",
+        description=(
+            "One concrete check a Basis engineer should run to confirm the finding "
+            "(for example a transaction or report). Only if the report supports one; "
+            "otherwise leave empty."
+        ),
+    )
+    risk_types: list[
+        Literal[
+            "Security",
+            "Availability",
+            "Performance",
+            "Compliance",
+            "Cost",
+            "Data integrity",
+            "Supportability",
+            "Operations",
+        ]
+    ] = Field(
+        default_factory=list,
+        description="1 or 2 risk types, the main one first.",
+    )
+    subject: str = Field(
+        default="",
+        description=(
+            "The exact object the finding is about, copied verbatim from the report "
+            "(SQL statement hash, user name, parameter, client, host, component). "
+            "Empty if there is none."
+        ),
+    )
+    due_date: str = Field(
+        default="",
+        description=(
+            "Date as YYYY-MM-DD, only when the report itself states a date "
+            "(for example end of maintenance). Otherwise empty."
+        ),
+    )
 
 
 class DomainAnalysis(BaseModel):
@@ -88,6 +138,59 @@ class SynthesisResult(BaseModel):
     top_5_priority_actions: list[str]
 
 
+class SapAlert(BaseModel):
+    """One row of SAP's own "Alert Overview" table."""
+    rating: str  # plain uppercase word, e.g. "RED"
+    text: str
+
+
+class SapCheck(BaseModel):
+    """One row of SAP's own "Check Overview" table (topic or subtopic)."""
+    topic: str
+    subtopic: str = ""
+    rating: str  # plain uppercase word, e.g. "YELLOW"
+    raw_title: str
+
+
+class SapServiceSummary(BaseModel):
+    alerts: list[SapAlert] = Field(default_factory=list)
+    checks: list[SapCheck] = Field(default_factory=list)
+
+
+class SystemProfile(BaseModel):
+    """Short "ID card" of the analysed SAP system. Every field is optional."""
+
+    sid: str = ""
+    installation_number: str = ""
+    session_number: str = ""
+    product: str = ""
+    product_version: str = ""
+    database: str = ""
+    database_version: str = ""
+    db_id: str = ""
+    os: str = ""
+    system_role: str = ""
+    period_start: str = ""
+    period_end: str = ""
+    sources: dict[str, str] = Field(default_factory=dict)
+
+
+class ReconciliationRow(BaseModel):
+    """One SAP alert or check compared with what we found (built by Python, no AI)."""
+
+    source: Literal["Alert", "Check"]
+    sap_topic: str = ""
+    sap_item: str = ""
+    sap_rating: str = ""
+    our_section_id: str = ""
+    our_section_title: str = ""
+    our_rating: str = ""  # RED / YELLOW / GREEN, or "" when not covered
+    finding_ids: list[str] = Field(default_factory=list)
+    verdict: str = ""
+    reason: str = ""
+    match_score: float | None = None  # alerts only
+
+
 class AnalysisResult(BaseModel):
     domain_analyses: list[DomainAnalysis]
     cross_references: list[CrossReference]
@@ -99,3 +202,6 @@ class AnalysisResult(BaseModel):
     coverage: list[SectionCoverage] = Field(default_factory=list)
     degraded: bool = False
     warnings: list[str] = Field(default_factory=list)
+    system_profile: SystemProfile | None = None
+    sap_summary: SapServiceSummary | None = None
+    reconciliation: list[ReconciliationRow] = Field(default_factory=list)

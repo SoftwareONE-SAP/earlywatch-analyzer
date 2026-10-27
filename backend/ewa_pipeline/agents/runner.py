@@ -13,7 +13,7 @@ from ewa_pipeline.services.progress import ProgressCallback, ProgressReporter
 from .orchestrator import EwaAnalysisState, build_ewa_graph
 from .provenance import enrich_domain_analysis_provenance
 from .skill_loader import SkillRegistry
-from .planning import prepare_sections
+from .planning import SAP_SUMMARY_SKIP_REASON, is_sap_summary_section, prepare_sections
 
 console = Console()
 
@@ -35,6 +35,7 @@ def run_analysis(
     cost_tracker: CostTracker,
     verbose: bool = False,
     progress_callback: ProgressCallback | None = None,
+    system_profile: str = "",
 ) -> AnalysisResult:
     """
     Run the full LangGraph EWA analysis pipeline.
@@ -54,10 +55,14 @@ def run_analysis(
         node.id: get_node_content(pages, node)
         for node in sections
     }
-    eligible_sections = [node for node in sections if sections_content[node.id].strip()]
+    excluded_ids = {node.id for node in sections if is_sap_summary_section(node)}
+    eligible_sections = [node for node in sections
+                         if sections_content[node.id].strip() and node.id not in excluded_ids]
     if not eligible_sections:
         raise AnalysisFailedError("No text-bearing source sections are available for analysis.")
     sections_available, context_sections = prepare_sections(tree, eligible_sections, sections_content)
+    for sid in excluded_ids:  # never re-inject the excluded chapter as parent context
+        context_sections.pop(sid, None)
 
     initial_state: EwaAnalysisState = {
         "tree_summary": tree_to_summary(tree),
@@ -65,6 +70,7 @@ def run_analysis(
         "sections_content": sections_content,
         "context_sections": context_sections,
         "skills_catalog": skills_catalog,
+        "system_profile": system_profile,
         "section_tasks": [],
         "planning_notes": "",
         "analysis_tasks": [],
@@ -210,7 +216,8 @@ def run_analysis(
                 reason="" if node.id in by_id else failed.get(node.id, "Source produced no result."))
                 for node in eligible_sections]
     coverage += [SectionCoverage(section_id=node.id, section_title=node.title, status="skipped",
-                                reason="Section contains no text content.")
+                                reason=SAP_SUMMARY_SKIP_REASON if node.id in excluded_ids
+                                else "Section contains no text content.")
                  for node in sections if node not in eligible_sections]
     warnings = [f"Section {sid}: {reason}" for sid, reason in failed.items()]
     if accumulated["correlation_failed"]:

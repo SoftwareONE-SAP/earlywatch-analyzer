@@ -18,22 +18,44 @@ from openpyxl import load_workbook
 from ewa_pipeline.agents import orchestrator
 from ewa_pipeline.agents.runner import AnalysisFailedError
 from ewa_pipeline.report.schemas import (
-    CrossReferenceList, DomainAnalysis, GroupedDomainAnalysis, OrchestratorPlan, SynthesisResult,
+    CrossReferenceList, DomainAnalysis, Finding, GroupedDomainAnalysis, OrchestratorPlan,
+    Remediation, SynthesisResult,
 )
+from ewa_pipeline.agents.prompts import DOMAIN_ANALYST_PROMPT, GROUPED_DOMAIN_ANALYST_PROMPT
 from ewa_pipeline.services.pipeline import run_pipeline
 from test_cli_analysis_settings import configured
 
 
-HTML = """<article><h1>Database</h1><h2>SQL A</h2>
+HTML = """<article><h1>Database for TP1</h1><h2>SQL A</h2>
 <p>SQL A runtime 95 ms; statement hash A123.</p><h2>SQL B</h2>
 <p>SQL B runtime 35 ms; statement hash B456.</p></article>"""
 
+SUMMARY_MARKER = "SAP_ALERT_OVERVIEW_MARKER"
+
+
+def html_with_summary(title):
+    return (f"<article><h1>{title}</h1><p>{SUMMARY_MARKER} red alert on SQL.</p>"
+            + HTML.replace("<article>", "", 1))
+
 
 class GroupedWebPipelineTests(unittest.TestCase):
-    def run_synthetic(self, directory, *, mode="complete", config=None, planner_fails=False):
+    @staticmethod
+    def rich_finding():
+        return Finding(
+            id="F001", title="Slow statement", severity="Medium",
+            description="Likely missing index", evidence="[YELLOW] runtime 95 ms",
+            impact="Slower dialog response",
+            remediation=Remediation(action="Check the plan", sap_transactions=["ST05"],
+                                    effort_estimate="Low", priority="Short-term"),
+            confidence="High", confidence_reason="CONF_REASON_MARKER",
+            to_confirm="TO_CONFIRM_MARKER", risk_types=["Performance"],
+            subject="SUBJECT_MARKER_A123", due_date="2026-12-31",
+        )
+
+    def run_synthetic(self, directory, *, mode="complete", config=None, planner_fails=False, html=HTML):
         config = config or configured()
         source = Path(directory) / "synthetic.html"
-        source.write_text(HTML, encoding="utf-8")
+        source.write_text(html, encoding="utf-8")
         output = Path(directory) / "synthetic.xlsx"
         calls = []
         self.last_calls = calls
@@ -51,6 +73,8 @@ class GroupedWebPipelineTests(unittest.TestCase):
                 if not ids:
                     ids = re.findall(r"^ID: (\d+)", prompt, re.MULTILINE)
                 self.assertTrue(ids)
+                self.assertIn("<system_profile>", prompt)
+                self.assertIn("System ID: TP1", prompt)
                 if mode == "exception":
                     raise RuntimeError("synthetic provider payload must never escape")
                 if mode == "missing":
@@ -60,7 +84,8 @@ class GroupedWebPipelineTests(unittest.TestCase):
                 elif mode == "unknown":
                     ids = ["9999"]
                 analyses = [DomainAnalysis(section_id=sid, section_title="Untrusted model title",
-                            findings=[], overall_health="Healthy") for sid in ids]
+                            findings=[self.rich_finding()] if mode == "findings" else [],
+                            overall_health="Warning" if mode == "findings" else "Healthy") for sid in ids]
                 parsed = GroupedDomainAnalysis(analyses=analyses) if schema is GroupedDomainAnalysis else analyses[0]
             elif schema is CrossReferenceList:
                 parsed = CrossReferenceList(items=[])
@@ -101,6 +126,12 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(len(grouped), 1)
             self.assertIn("A123", grouped[0])
             self.assertIn("B456", grouped[0])
+            self.assertIsNotNone(result.system_profile)
+            self.assertEqual(result.system_profile.sid, "TP1")
+            self.assertIsNotNone(result.sap_summary)
+            persisted_early = json.loads(artifacts.result_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted_early["system_profile"]["sid"], "TP1")
+            self.assertIn("sap_summary", persisted_early)
             self.assertEqual(tracker._entries["phase1_domain_analysis"].calls, 1)
             self.assertEqual(tracker._entries["phase1_domain_analysis"].input_tokens, 100)
             self.assertEqual(result.token_usage.phase1_cache_write_tokens, 5)
@@ -113,6 +144,22 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(workbook["Source Coverage"]["A3"].value, "0003")
             workbook.close()
 
+    def test_service_summary_chapter_is_never_sent_to_analysts(self):
+        for title in ("1 Service Summary", "Service Summary"):
+            with self.subTest(title=title), TemporaryDirectory() as directory:
+                result, _, _, calls = self.run_synthetic(
+                    directory, planner_fails=True, html=html_with_summary(title))
+                self.assertFalse(any(SUMMARY_MARKER in prompt for schema, prompt in calls
+                                     if schema in (DomainAnalysis, GroupedDomainAnalysis)))
+                skipped = [c for c in result.coverage if c.status == "skipped"]
+                self.assertEqual([c.section_title for c in skipped], [title])
+                self.assertEqual(skipped[0].reason, "SAP Service Summary — read by Python, see SAP vs Us")
+                self.assertNotIn(skipped[0].section_id,
+                                 [sid for t in result.analysis_tasks for sid in t.source_section_ids])
+                self.assertNotIn(skipped[0].section_id,
+                                 [sid for t in result.analysis_tasks for sid in t.context_section_ids])
+                self.assertEqual(sorted(c.status for c in result.coverage), ["analyzed", "analyzed", "skipped"])
+
     def test_portal_count_limit_splits_shared_task(self):
         config = configured().model_copy(update={"max_task_sections": 1, "max_parent_context_chars": 0})
         with TemporaryDirectory() as directory:
@@ -121,6 +168,10 @@ class GroupedWebPipelineTests(unittest.TestCase):
         self.assertTrue(all(task.context_content_chars == 0 for task in result.analysis_tasks))
         self.assertEqual(tracker._entries["phase1_domain_analysis"].calls, 2)
         self.assertFalse(any(schema is GroupedDomainAnalysis for schema, _ in calls))
+        single = [prompt for schema, prompt in calls if schema is DomainAnalysis]
+        self.assertEqual(len(single), 2)
+        self.assertTrue(all("<system_profile>" in prompt and "System ID: TP1" in prompt
+                            for prompt in single))
 
     def test_planner_failure_falls_back_to_related_hierarchy_group(self):
         with TemporaryDirectory() as directory:
@@ -161,6 +212,32 @@ class GroupedWebPipelineTests(unittest.TestCase):
         self.assertTrue(result.degraded)
         self.assertEqual(result.overall_system_health, "Unknown")
         self.assertEqual(len(result.domain_analyses), 2)
+
+    def test_analyst_prompts_format_and_carry_finding_field_guidance(self):
+        single = DOMAIN_ANALYST_PROMPT.format(
+            section_title="T", section_id="0001", analysis_focus="F", skill_context="S", content="C",
+            system_profile="")
+        grouped = GROUPED_DOMAIN_ANALYST_PROMPT.format(
+            section_title="T", section_ids="0001", analysis_focus="F", skill_context="S", content="C",
+            system_profile="")
+        for prompt in (single, grouped):
+            for text in ("Security, Availability, Performance, Compliance, Cost, Data integrity, "
+                         "Supportability, Operations", "confidence_reason", "to_confirm",
+                         "subject", "due_date", "YYYY-MM-DD", "verbatim"):
+                self.assertIn(text, prompt)
+
+    def test_later_calls_omit_bulky_finding_fields_but_keep_correlation_fields(self):
+        with TemporaryDirectory() as directory:
+            result, _, _, calls = self.run_synthetic(directory, mode="findings")
+        self.assertTrue(any(f.confidence_reason for a in result.domain_analyses for f in a.findings))
+        later = [prompt for schema, prompt in calls if schema in (CrossReferenceList, SynthesisResult)]
+        self.assertEqual(len(later), 2)
+        for prompt in later:
+            for key in ("confidence_reason", "to_confirm", "due_date",
+                        "CONF_REASON_MARKER", "TO_CONFIRM_MARKER", "2026-12-31"):
+                self.assertNotIn(key, prompt)
+            for key in ('"subject"', "SUBJECT_MARKER_A123", '"risk_types"', '"confidence"'):
+                self.assertIn(key, prompt)
 
 
 if __name__ == "__main__":

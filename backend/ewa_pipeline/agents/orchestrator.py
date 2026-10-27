@@ -13,9 +13,11 @@ synthesize      (synthesis deployment) Produces the executive summary and priori
 
 from __future__ import annotations
 
+import html
 import json
 import operator
-from typing import Annotated, Any, TypedDict
+import re
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -50,6 +52,7 @@ class EwaAnalysisState(TypedDict):
     sections_content: dict[str, str]     # section_id to source content
     context_sections: dict[str, str]
     skills_catalog: str
+    system_profile: NotRequired[str]     # short system ID card text for analyst prompts
 
     # After planner node
     section_tasks: list[dict]            # grouped source IDs, budgets, context
@@ -72,6 +75,15 @@ class EwaAnalysisState(TypedDict):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Finding fields the cross-reference and synthesis calls do not need (saves input tokens).
+_LATER_CALL_EXCLUDED_FINDING_FIELDS = {"confidence_reason", "to_confirm", "due_date"}
+
+
+def _dump_for_later_calls(analysis: DomainAnalysis) -> dict:
+    return analysis.model_dump(
+        exclude={"findings": {"__all__": _LATER_CALL_EXCLUDED_FINDING_FIELDS}}
+    )
 
 def _usage_details(meta: Any, key: str, *detail_keys: str) -> int:
     if isinstance(meta, dict):
@@ -119,6 +131,44 @@ def _derive_health(analyses: list[DomainAnalysis]) -> str:
     return "Healthy"
 
 
+_ROW = r"<tr(?:\s[^>]*)?>(.*?)</tr\s*>"
+_TR_RE = re.compile(r"\s*(?:" + _ROW + r"\s*)+", re.IGNORECASE | re.DOTALL)
+_ROW_RE = re.compile(_ROW, re.IGNORECASE | re.DOTALL)
+_CELL_RE = re.compile(r"<t[dh](?:\s[^>]*)?>(.*?)</t[dh]\s*>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
+_ID_PREFIX_RE = re.compile(r"^\s*\d{4}\s*[,:]\s*")
+_IMAGE_LINE_RE = re.compile(r"^\s*(?:[^:]*:\s*)?[\"'“”]?\[IMAGE\][\"'“”]?\s*$")
+
+
+def clean_evidence(text: str) -> str:
+    """Make finding evidence readable: no HTML tags, source-ID prefixes or [IMAGE] lines."""
+    if not text:
+        return text
+
+    def _rows(match: re.Match) -> str:
+        lines = []
+        for row in _ROW_RE.findall(match.group(0)):
+            cells = [_TAG_RE.sub("", c).strip() for c in _CELL_RE.findall(row)]
+            lines.append(" | ".join(cells))
+        return "\n" + "\n".join(lines) + "\n"
+
+    text = _TR_RE.sub(_rows, text)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text)
+
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = _ID_PREFIX_RE.sub("", raw.rstrip(), count=1).rstrip()
+        if line.strip().strip("\"'").strip() == "[IMAGE]" or _IMAGE_LINE_RE.match(line):
+            continue
+        if not line.strip() and (not lines or not lines[-1]):
+            continue
+        lines.append(line)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
 def _normalise_finding_ids(
     analysis: DomainAnalysis,
     *,
@@ -128,7 +178,12 @@ def _normalise_finding_ids(
     """Use trusted section metadata and globally unambiguous finding IDs."""
     trusted_id = str(section_id or analysis.section_id).strip()
     findings = [
-        finding.model_copy(update={"id": f"{trusted_id}-F{index:03d}"})
+        finding.model_copy(
+            update={
+                "id": f"{trusted_id}-F{index:03d}",
+                "evidence": clean_evidence(finding.evidence),
+            }
+        )
         for index, finding in enumerate(analysis.findings, start=1)
     ]
     return analysis.model_copy(
@@ -241,13 +296,15 @@ def build_ewa_graph(
         if not state["section_tasks"]:
             return "cross_reference"
         lookup = {s["id"]: s for s in state["sections_available"]}
-        return [Send("domain_analyst", {**task, "sources": [
+        profile = state.get("system_profile", "")
+        return [Send("domain_analyst", {**task, "system_profile": profile, "sources": [
             {"id": sid, "title": lookup[sid]["title"], "content": state["sections_content"][sid]}
             for sid in task["section_ids"]]}) for task in state["section_tasks"]]
 
     def domain_analyst(task: dict) -> dict:
         """One bounded invocation; preserve each source's identity and full content."""
         sources = task["sources"]
+        profile_text = task.get("system_profile") or "Not available."
         references = task.get("reference_ids") or skill_registry.suggest_references(
             task["skill_name"], " ".join([task["section_title"], task["analysis_focus"],
                 *[s["title"] + " " + s["content"][:100] for s in sources]]))
@@ -260,14 +317,16 @@ def build_ewa_graph(
             if len(sources) == 1:
                 source = sources[0]
                 prompt = DOMAIN_ANALYST_PROMPT.format(section_title=source["title"], section_id=source["id"],
-                    content=source["content"], skill_context=context, analysis_focus=task["analysis_focus"])
+                    content=source["content"], skill_context=context, analysis_focus=task["analysis_focus"],
+                    system_profile=profile_text)
                 chain = domain_chain
             else:
                 source_text = "\n\n".join(
                     f"Source Section ID: {s['id']}\nSource title: {s['title']}\n{s['content']}" for s in sources)
                 prompt = GROUPED_DOMAIN_ANALYST_PROMPT.format(section_title=task["section_title"],
                     section_ids=", ".join(task["section_ids"]), content=source_text,
-                    skill_context=context, analysis_focus=task["analysis_focus"])
+                    skill_context=context, analysis_focus=task["analysis_focus"],
+                    system_profile=profile_text)
                 chain = grouped_chain
             if task["parent_context"]:
                 prompt += "\n\nSupplementary parent context (excerpts; not owned source sections):\n" + task["parent_context"]
@@ -305,7 +364,7 @@ def build_ewa_graph(
         if not state["domain_analyses"]:
             return {"cross_references": [], "correlation_failed": True}
         all_findings = {
-            da.section_id: da.model_dump()
+            da.section_id: _dump_for_later_calls(da)
             for da in state["domain_analyses"]
         }
         prompt = CROSS_REFERENCE_PROMPT.format(
@@ -339,7 +398,7 @@ def build_ewa_graph(
             return {"executive_summary": "No section analysis succeeded.", "overall_system_health": "Unknown",
                     "top_5_priority_actions": [], "synthesis_failed": True}
         all_findings_text = json.dumps(
-            [da.model_dump() for da in state["domain_analyses"]], indent=2
+            [_dump_for_later_calls(da) for da in state["domain_analyses"]], indent=2
         )
         cross_refs_text = json.dumps(
             [xr.model_dump() if hasattr(xr, "model_dump") else xr
