@@ -11,25 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
+from ewa_pipeline.agents.alert_decision import CRITERIA, EVIDENCE_LIMIT, QUESTION, decision_state  # noqa: F401
 from ewa_pipeline.report.reconciliation import ALERT_MATCH_THRESHOLD, _alert_score, _words
 from ewa_pipeline.report.schemas import AnalysisResult, SapServiceSummary
-
-QUESTION = (
-    "SAP's EarlyWatch Alert report raised the alert in sap_alert. Our analysis wrote the finding "
-    "in finding. Does this finding report the same specific problem that the SAP alert warns about?"
-)
-CRITERIA = {
-    "true": (
-        "Yes: the finding is about the same specific problem as the alert (same object and same "
-        "kind of issue), even if it uses different words or gives more detail."
-    ),
-    "false": (
-        "No: the finding is about a different problem. Sharing only a general topic (for example "
-        "both about SAP HANA, security, or passwords) is not enough."
-    ),
-}
-
-EVIDENCE_LIMIT = 1500
 
 PAIR_COLUMNS = [
     "alert_no", "alert_rating", "alert_text", "finding_id", "section_title", "severity",
@@ -71,20 +55,6 @@ def build_pairs(result: dict) -> list[dict]:
             rows[i]["jaccard_rank"] = rank
         pairs.extend(rows)
     return pairs
-
-
-def decision_state(alert: dict, finding: dict, section_title: str) -> dict:
-    """The context sent to Decision-1. `alert` has rating+text, `finding` has the Finding fields."""
-    return {
-        "sap_alert": {"rating": alert["rating"], "text": alert["text"]},
-        "finding": {
-            "id": finding["id"],
-            "section": section_title,
-            "severity": finding["severity"],
-            "title": finding["title"],
-            "evidence": (finding.get("evidence") or "")[:EVIDENCE_LIMIT],
-        },
-    }
 
 
 def pair_state(pair: dict) -> dict:
