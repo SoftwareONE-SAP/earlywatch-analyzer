@@ -4,10 +4,12 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ewa_pipeline.agents.alert_decision import CRITERIA, QUESTION, score_alerts
+from ewa_pipeline.services.pipeline import _reconcile_safely
 from ewa_pipeline.report.schemas import AnalysisResult, SapAlert, SapServiceSummary
 from test_alert_match_trial import make_result
 from test_decision_client import FakePost, FakeResponse, make_config, ok
@@ -75,6 +77,30 @@ class ScoreAlertsTests(unittest.TestCase):
         one_alert = SapServiceSummary(alerts=[SapAlert(rating="RED", text="x")], checks=[])
         no_findings = AnalysisResult.model_validate({**make_result(), "domain_analyses": []})
         self.assertEqual(score_alerts(no_findings, one_alert, self.config, post=RoutedPost(TABLE)), {})
+
+
+class PipelineWiringTests(unittest.TestCase):
+    def setUp(self):
+        data = make_result()
+        self.result = AnalysisResult.model_validate(data)
+        self.summary = SapServiceSummary.model_validate(data["sap_summary"])
+
+    def test_off_makes_no_scoring_call_and_matches_by_word_overlap(self):
+        with patch("ewa_pipeline.agents.decision_client.requests.post") as post:
+            rows = _reconcile_safely(self.result, self.summary, None, None, make_config())
+        post.assert_not_called()
+        self.assertEqual(len(rows), 3)
+        self.assertNotIn("Decision-1", [r.match_method for r in rows])
+
+    def test_scores_reach_reconcile_and_failures_fall_back(self):
+        config = make_config(decision_enabled=True)
+        with patch("ewa_pipeline.services.pipeline.score_alerts", return_value={2: {"P-1": 0.99}}):
+            rows = _reconcile_safely(self.result, self.summary, None, None, config)
+        self.assertEqual((rows[2].match_method, rows[2].finding_ids), ("Decision-1", ["P-1"]))
+        with patch("ewa_pipeline.services.pipeline.score_alerts", side_effect=RuntimeError("boom")):
+            rows = _reconcile_safely(self.result, self.summary, None, None, config)
+        self.assertEqual(len(rows), 3)
+        self.assertNotIn("Decision-1", [r.match_method for r in rows])
 
 
 if __name__ == "__main__":
