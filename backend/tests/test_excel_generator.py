@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from openpyxl import load_workbook
 
 from ewa_pipeline.report.excel_generator import generate
-from ewa_pipeline.report.schemas import AnalysisResult, DomainAnalysis, Finding, Remediation
+from ewa_pipeline.report.schemas import (
+    AnalysisResult, DomainAnalysis, Finding, ReconciliationRow, Remediation, SectionCoverage,
+)
 from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 
@@ -168,6 +170,87 @@ class ExcelGeneratorTests(unittest.TestCase):
         names = load_workbook(path).sheetnames
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(names[1], "All Findings")
+
+
+def _row(source, verdict, **kw) -> ReconciliationRow:
+    return ReconciliationRow(source=source, verdict=verdict, **kw)
+
+
+class SapVsUsTests(unittest.TestCase):
+    def _generate(self, result):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        generate(result, path)
+        return load_workbook(path)
+
+    def test_sap_vs_us_sheet_position_rows_and_counts(self):
+        result = build_result()
+        result.reconciliation = [
+            _row("Alert", "Agree", sap_topic="Alerts", sap_item="Kernel old", sap_rating="RED",
+                 our_section_id="1", our_section_title="Software Configuration",
+                 our_rating="RED", finding_ids=["F-001", "F-003"], match_score=0.8),
+            _row("Alert", "Not covered", sap_item="Odd alert", sap_rating="YELLOW"),
+            _row("Check", "Agree", sap_topic="Performance", sap_rating="GREEN", our_rating="GREEN"),
+            _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
+        ]
+        wb = self._generate(result)
+        self.assertEqual(wb.sheetnames[:3], ["Executive Summary", "All Findings", "SAP vs Us"])
+        ws = wb["SAP vs Us"]
+
+        counts = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)
+                  for r in range(3, 6)}
+        self.assertEqual(counts["Agree"], (1, 1, 2))
+        self.assertEqual(counts["Not covered"], (1, 0, 1))
+        self.assertEqual(counts["We rated higher"], (0, 1, 1))
+
+        hdr_row = next(r for r in range(1, 15) if ws.cell(r, 1).value == "Source")
+        headers = _headers(ws, hdr_row)
+        self.assertEqual(headers[:4], ["Source", "SAP Topic", "SAP Item", "SAP Rating"])
+        self.assertEqual(ws.max_row - hdr_row, 4)  # one row per reconciliation row
+        first = dict(zip(headers, [c.value for c in ws[hdr_row + 1]]))
+        self.assertEqual(first["Our Finding IDs"], "F-001, F-003")
+        self.assertEqual(first["Verdict"], "Agree")
+        self.assertEqual(first["Match score"], 0.8)
+        self.assertEqual(ws.freeze_panes, f"A{hdr_row + 1}")
+
+    def test_verified_healthy_rows_and_sap_disagrees(self):
+        result = build_result()  # sections "1" and "2" have findings
+        result.coverage = [
+            SectionCoverage(section_id="1", section_title="Software Configuration", status="analyzed"),
+            SectionCoverage(section_id="3", section_title="Hardware", status="analyzed"),
+            SectionCoverage(section_id="4", section_title="Database", status="analyzed"),
+            SectionCoverage(section_id="5", section_title="Security", status="failed"),
+        ]
+        result.reconciliation = [
+            _row("Check", "Not covered", sap_topic="Database", sap_rating="YELLOW", our_section_id="4"),
+            _row("Check", "Agree", sap_topic="Database", sap_rating="RED", our_section_id="4"),
+        ]
+        wb = self._generate(result)
+        ws = wb["Verified Healthy"]
+        self.assertEqual(ws.max_row, 3)  # header + 2 healthy sections
+        rows = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value) for r in (2, 3)}
+        self.assertFalse(any(rows["3 Hardware"]))
+        self.assertEqual(rows["4 Database"], ("RED", "SAP disagrees"))
+        self.assertEqual(sum(1 for _, n in rows.values() if n == "SAP disagrees"), 1)
+
+    def test_both_sheets_ordered_when_both_present(self):
+        result = build_result()
+        result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
+        result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
+        names = self._generate(result).sheetnames
+        self.assertEqual(names[1:4], ["All Findings", "SAP vs Us", "Verified Healthy"])
+
+    def test_old_payload_has_neither_sheet(self):
+        wb = self._generate(build_result())
+        self.assertNotIn("SAP vs Us", wb.sheetnames)
+        self.assertNotIn("Verified Healthy", wb.sheetnames)
+
+    def test_coverage_without_healthy_sections_skips_sheet(self):
+        result = build_result()
+        result.coverage = [SectionCoverage(section_id="1", section_title="Software Configuration",
+                                           status="analyzed")]
+        self.assertNotIn("Verified Healthy", self._generate(result).sheetnames)
 
 
 if __name__ == "__main__":
