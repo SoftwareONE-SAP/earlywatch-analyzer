@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import re
 
+from bs4 import BeautifulSoup
+
 from ewa_pipeline.indexer.tree_navigator import TreeNode, flatten_tree
 from ewa_pipeline.report.schemas import (
     AnalysisResult,
@@ -25,6 +27,9 @@ RUNNER_UP_GAP = 0.05
 # Heading check: a report heading must share this many words with the alert, and this share of its own words.
 HEADING_MIN_WORDS = 3
 HEADING_MIN_SHARE = 0.8
+# Statement check: SAP's section for an alert must share this many words, and this share of the alert's words.
+HOME_MIN_WORDS = 3
+HOME_MIN_SHARE = 0.5
 # Words that appear in many headings and say nothing about the topic.
 _HEADING_NOISE = frozenset("sap hana database abap stack system systems netweaver server application".split())
 
@@ -38,6 +43,8 @@ _STOP_WORDS = frozenset(
 )
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _LEADING_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s+")
+_STATEMENT_ID_RE = re.compile(r"\b[0-9a-f]{32}\b")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def clean_title(title: str, sid: str = "", db_id: str = "") -> str:
@@ -84,6 +91,44 @@ def _heading_score(alert_words: set[str], titles: list[str], sid: str = "", db_i
         if len(shared) >= HEADING_MIN_WORDS and len(shared) / len(hw) >= HEADING_MIN_SHARE and len(shared) > best[0]:
             best = (len(shared), title)
     return best
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().lower()
+
+
+def _section_texts(nodes: list[TreeNode]) -> list[tuple[TreeNode, str]]:
+    """(node, plain text of its section) for every node that has text. Parsed once per report."""
+    return [(n, BeautifulSoup(n.content, "html.parser").get_text("\n")) for n in nodes if n.content]
+
+
+def _home_section(alert_text: str, section_texts: list[tuple[TreeNode, str]]) -> TreeNode | None:
+    """The report section whose sentences repeat the alert's wording best, else None.
+
+    Sections that contain the alert text verbatim (the Service Summary itself) are skipped.
+    The winner needs enough shared words and must beat the runner-up; a tie gives None.
+    """
+    alert_words = _words(alert_text)
+    verbatim = _squash(alert_text)
+    scored: list[tuple[int, TreeNode]] = []
+    for sec, text in section_texts:
+        if verbatim and verbatim in _squash(text):
+            continue
+        best = max((len(alert_words & _words(s)) for s in _SENTENCE_SPLIT_RE.split(text)), default=0)
+        scored.append((best, sec))
+    scored.sort(key=lambda item: -item[0])
+    if not scored:
+        return None
+    top = scored[0][0]
+    if top < HOME_MIN_WORDS or top < HOME_MIN_SHARE * len(alert_words):
+        return None
+    if len(scored) > 1 and scored[1][0] == top:
+        return None
+    return scored[0][1]
+
+
+def _statement_ids(finding: Finding) -> set[str]:
+    """32-character SQL statement IDs named in a finding's evidence or subject."""
+    return set(_STATEMENT_ID_RE.findall(f"{finding.evidence or ''} {finding.subject or ''}"))
 
 
 def _colour(severity: str) -> str:
@@ -146,6 +191,7 @@ def reconcile(
     keep: float = 0.85,
     possible: float = 0.5,
     heading_check: bool = True,
+    statement_check: bool = True,
 ) -> list[ReconciliationRow]:
     """One row per SAP alert and per SAP check. Never raises on odd input.
 
@@ -176,6 +222,7 @@ def reconcile(
 
         all_findings = [f for a in result.domain_analyses for f in a.findings]
         heading_path = _heading_paths(tree) if heading_check else {}
+        section_texts = _section_texts(nodes) if statement_check else []
         rows = []
         for i, a in enumerate(sap_summary.alerts):
             scores = (alert_scores or {}).get(i)
@@ -187,6 +234,12 @@ def reconcile(
                     )
                 except Exception as exc:  # the heading check is an extra; keep the Decision-1 row
                     logger.warning("Heading check failed for alert %s: %s", i, exc)
+            if statement_check:
+                try:
+                    home = _home_section(a.text, section_texts)
+                    row = _statement_rerank(row, a, all_findings, scores, section_of, title_of, home, possible)
+                except Exception as exc:  # the statement check is an extra too; keep the row as it is
+                    logger.warning("Statement check failed for alert %s: %s", i, exc)
             rows.append(row)
         rows += [
             _check_row(c, by_title, findings_by_section, coverage, sid, db_id) for c in sap_summary.checks
@@ -302,6 +355,43 @@ def _heading_rerank(
     )
     return row
 
+
+def _statement_rerank(row, alert, findings, scores, section_of, title_of, home, possible) -> ReconciliationRow:
+    """Switch to a finding about the SQL statement that SAP's own section for this alert lists.
+
+    `home` is the report section found for the alert. Only Decision-1 and Report heading rows
+    change, and only when the current pick names none of the section's statement IDs while a
+    finding with p >= `possible` does. Nothing happens when there is no such finding.
+    """
+    if row.match_method not in ("Decision-1", "Report heading") or home is None or not row.finding_ids:
+        return row
+    home_ids = set(_STATEMENT_ID_RE.findall(home.content or ""))
+    if not home_ids:
+        return row
+    by_id: dict[str, Finding] = {}
+    for finding in findings:
+        by_id.setdefault(finding.id, finding)
+    old = by_id.get(row.finding_ids[0])
+    if old is None or _statement_ids(old) & home_ids:
+        return row
+    best = None  # (p, finding, shared ids)
+    for fid, finding in by_id.items():
+        shared = _statement_ids(finding) & home_ids
+        p = (scores or {}).get(fid, 0.0)
+        if shared and p >= possible and (best is None or p > best[0]):
+            best = (p, finding, shared)
+    if best is None:
+        return row
+    best_p, new, shared = best
+    old_p = (scores or {}).get(old.id, 0.0)
+    _fill_match(row, alert, new, section_of, title_of)
+    row.match_method = "Same SQL statement"
+    row.match_score = round(best_p, 3)
+    row.reason = (
+        f'Same SQL statement as report section "{home.title}" (p={best_p:.2f}, statement {sorted(shared)[0]}): '
+        f"{row.reason}; also close, please check: {_candidate(old, old_p)}"
+    )
+    return row
 
 def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.85, possible=0.5) -> ReconciliationRow:
     """Word overlap first; then Decision-1's view, when we have its scores for this alert."""

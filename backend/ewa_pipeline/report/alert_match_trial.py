@@ -265,12 +265,12 @@ def format_scoreboard(board: dict) -> str:
 
 def replay_board(result: dict, tree: dict, saved: dict, labels: dict[int, set[str]],
                  keep: float, possible: float) -> dict:
-    """Re-run the live matching rules on saved Decision-1 scores, with and without the heading check.
+    """Re-run the live matching rules on saved Decision-1 scores, with and without the heading and same-statement checks.
 
     Makes no AI calls. `saved` is the _d1_scores.json content: {"<alert no>|<finding id>": p}.
     Alert numbers start at 1. Returns {"before", "after", "changed"} where before/after count
     right / wrong / missed / correct_none for labelled alerts, and changed lists
-    (alert_no, old finding id, new finding id) for every alert the heading check moved.
+    (alert_no, old finding id, new finding id) for every alert those checks moved.
     """
     analysis = AnalysisResult.model_validate(result)
     summary = SapServiceSummary.model_validate(result.get("sap_summary") or {})
@@ -280,10 +280,10 @@ def replay_board(result: dict, tree: dict, saved: dict, labels: dict[int, set[st
         if p is not None and alert_no.isdigit():
             alert_scores.setdefault(int(alert_no) - 1, {})[finding_id] = float(p)
 
-    def first_ids(heading_check: bool) -> dict[int, str | None]:
+    def first_ids(checks: bool) -> dict[int, str | None]:
         rows = reconcile(
             analysis, summary, tree, analysis.system_profile, alert_scores=alert_scores,
-            keep=keep, possible=possible, heading_check=heading_check,
+            keep=keep, possible=possible, heading_check=checks, statement_check=checks,
         )
         alert_rows = [r for r in rows if r.source == "Alert"]
         return {i: (r.finding_ids[0] if r.finding_ids else None) for i, r in enumerate(alert_rows, start=1)}
