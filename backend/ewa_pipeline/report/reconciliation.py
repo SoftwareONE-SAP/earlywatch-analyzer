@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import re
 
+from bs4 import BeautifulSoup
+
 from ewa_pipeline.indexer.tree_navigator import TreeNode, flatten_tree
 from ewa_pipeline.report.schemas import (
     AnalysisResult,
@@ -25,6 +27,9 @@ RUNNER_UP_GAP = 0.05
 # Heading check: a report heading must share this many words with the alert, and this share of its own words.
 HEADING_MIN_WORDS = 3
 HEADING_MIN_SHARE = 0.8
+# Statement check: SAP's section for an alert must share this many words, and this share of the alert's words.
+HOME_MIN_WORDS = 3
+HOME_MIN_SHARE = 0.5
 # Words that appear in many headings and say nothing about the topic.
 _HEADING_NOISE = frozenset("sap hana database abap stack system systems netweaver server application".split())
 
@@ -38,6 +43,8 @@ _STOP_WORDS = frozenset(
 )
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _LEADING_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)*\.?\s+")
+_STATEMENT_ID_RE = re.compile(r"\b[0-9a-f]{32}\b")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def clean_title(title: str, sid: str = "", db_id: str = "") -> str:
@@ -84,6 +91,44 @@ def _heading_score(alert_words: set[str], titles: list[str], sid: str = "", db_i
         if len(shared) >= HEADING_MIN_WORDS and len(shared) / len(hw) >= HEADING_MIN_SHARE and len(shared) > best[0]:
             best = (len(shared), title)
     return best
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().lower()
+
+
+def _section_texts(nodes: list[TreeNode]) -> list[tuple[TreeNode, str]]:
+    """(node, plain text of its section) for every node that has text. Parsed once per report."""
+    return [(n, BeautifulSoup(n.content, "html.parser").get_text("\n")) for n in nodes if n.content]
+
+
+def _home_section(alert_text: str, section_texts: list[tuple[TreeNode, str]]) -> TreeNode | None:
+    """The report section whose sentences repeat the alert's wording best, else None.
+
+    Sections that contain the alert text verbatim (the Service Summary itself) are skipped.
+    The winner needs enough shared words and must beat the runner-up; a tie gives None.
+    """
+    alert_words = _words(alert_text)
+    verbatim = _squash(alert_text)
+    scored: list[tuple[int, TreeNode]] = []
+    for sec, text in section_texts:
+        if verbatim and verbatim in _squash(text):
+            continue
+        best = max((len(alert_words & _words(s)) for s in _SENTENCE_SPLIT_RE.split(text)), default=0)
+        scored.append((best, sec))
+    scored.sort(key=lambda item: -item[0])
+    if not scored:
+        return None
+    top = scored[0][0]
+    if top < HOME_MIN_WORDS or top < HOME_MIN_SHARE * len(alert_words):
+        return None
+    if len(scored) > 1 and scored[1][0] == top:
+        return None
+    return scored[0][1]
+
+
+def _statement_ids(finding: Finding) -> set[str]:
+    """32-character SQL statement IDs named in a finding's evidence or subject."""
+    return set(_STATEMENT_ID_RE.findall(f"{finding.evidence or ''} {finding.subject or ''}"))
 
 
 def _colour(severity: str) -> str:

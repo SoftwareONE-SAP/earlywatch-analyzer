@@ -6,10 +6,15 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ewa_pipeline.indexer.tree_navigator import flatten_tree
 from ewa_pipeline.report.reconciliation import (
+    _descendants,
     _heading_paths,
     _heading_score,
     _heading_words,
+    _home_section,
+    _section_texts,
+    _statement_ids,
     _words,
     clean_title,
     reconcile,
@@ -45,8 +50,11 @@ def cover(section_id: str, status: str = "analyzed") -> SectionCoverage:
     return SectionCoverage(section_id=section_id, section_title=f"S{section_id}", status=status)
 
 
-def node(node_id: str, title: str, children: list | None = None) -> dict:
-    return {"node_id": node_id, "title": title, "nodes": children or []}
+def node(node_id: str, title: str, children: list | None = None, text: str = "") -> dict:
+    raw = {"node_id": node_id, "title": title, "nodes": children or []}
+    if text:
+        raw["text"] = text
+    return raw
 
 
 TREE = {"structure": [
@@ -363,6 +371,47 @@ class HeadingCheckTests(unittest.TestCase):
         on = self.run_alert(self.BSW2, {"A-1": 0.97, "B-1": 0.75})
         self.assertEqual(on, self.run_alert(self.BSW2, {"A-1": 0.97, "B-1": 0.75}, heading_check=False))
 
+
+class HomeSectionTests(unittest.TestCase):
+    ALERT = "At least one SQL statement causes unnecessary high load on the system"
+    X = "9aaf8105bdad5308ab706eea28078d28"
+
+    def sections(self, *raw_nodes):
+        nodes = []
+        for top in flatten_tree({"structure": list(raw_nodes)}):
+            nodes.extend(_descendants(top))
+        return _section_texts(nodes)
+
+    def test_reworded_sentence_finds_the_right_section(self):
+        texts = self.sections(
+            node("0115", "14 Problematic SQL Statements",
+                 text=f"<p>At least one SQL statement causes unnecessary high load.</p><table><tr><td>{self.X}</td></tr></table>"),
+            node("0116", "15 Backup", text="<p>The last backup ran fine.</p>"),
+        )
+        home = _home_section(self.ALERT, texts)
+        self.assertEqual(home.id, "0115")
+        self.assertEqual(_statement_ids(finding("A-1", "High", evidence=f"statement {self.X} is slow")), {self.X})
+
+    def test_service_summary_with_the_verbatim_alert_is_skipped(self):
+        texts = self.sections(
+            node("0010", "2 Service Summary", text=f"<p>{self.ALERT}</p>"),
+            node("0115", "14 Problematic SQL Statements", text="<p>One SQL statement causes unnecessary high load.</p>"),
+        )
+        self.assertEqual(_home_section(self.ALERT, texts).id, "0115")
+
+    def test_tie_gives_no_home_section(self):
+        texts = self.sections(
+            node("0115", "A", text="<p>SQL statement causes unnecessary high load.</p>"),
+            node("0116", "B", text="<p>SQL statement causes unnecessary high load.</p>"),
+        )
+        self.assertIsNone(_home_section(self.ALERT, texts))
+
+    def test_too_few_or_too_small_a_share_of_words_gives_none(self):
+        texts = self.sections(node("0115", "A", text="<p>SQL statement runs.</p>"))
+        self.assertIsNone(_home_section(self.ALERT, texts))  # only 2 shared words
+        long_alert = "SQL statement causes unnecessary load but also memory disk network cpu swap paging"
+        texts = self.sections(node("0115", "A", text="<p>SQL statement causes unnecessary load.</p>"))
+        self.assertIsNone(_home_section(long_alert, texts))  # 4 shared words, under half of the alert's
 
 class EdgeCaseTests(unittest.TestCase):
     def test_none_or_empty_summary_gives_no_rows(self):
