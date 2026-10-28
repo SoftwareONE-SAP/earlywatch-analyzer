@@ -177,7 +177,7 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     for r, (value, kind) in enumerate(lines, 1):
         c = ws.cell(r, 1, value)
         if kind == "title":
-            c.font = _font(bold=True, size=16)
+            xs.title_band(ws, r, 1, 1)
         elif kind == "note":
             c.font = _font(size=10, color=xs.NOTE)
         elif kind == "head":
@@ -251,6 +251,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
     c.font = _font(bold=True, size=16)
     c.alignment = Alignment(horizontal="left", vertical="center")
+    xs.title_band(ws, 1, 1, 8)
     ws.row_dimensions[1].height = 26
 
     # Row 2: health line (the upper-case word stays: tests and readers look for it)
@@ -304,10 +305,8 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     r = number_row + 2
 
     # Top 5 priority actions
-    for col in range(2, 9):
-        ws.cell(r, col).border = Border(bottom=Side(style="medium", color=xs.HEADER_LINE))
     c = ws.cell(r, 2, "Top 5 priority actions")
-    c.font = _font(bold=True, size=12)
+    c.font = _font(bold=True, size=12, color=xs.NAVY)
     ws.row_dimensions[r].height = 20
     r += 1
     for i, action in enumerate(result.top_5_priority_actions, 1):
@@ -323,7 +322,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
 
     r += 1
     c = ws.cell(r, 2, "Findings by section")
-    c.font = _font(bold=True, size=12)
+    c.font = _font(bold=True, size=12, color=xs.NAVY)
     r += 1
 
     # Section table
@@ -392,6 +391,7 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     bl.hyperlink = "#'Executive Summary'!A1"
     bl.font = _link_font()
     bl.alignment = _align(h="left")
+    xs.title_band(ws, 1, 1, len(COLS), size=10, bold=False, underline="single")
 
     # Row 2: column headers
     _hdr_row(ws, 2, COLS)
@@ -491,6 +491,7 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     displays = [rd.describe(row, findings_by_id) for row in rows]
 
     ws.cell(1, 1, _SAP_VS_US).font = _font(bold=True, size=16)
+    xs.title_band(ws, 1, 1, 14)  # 14 = number of columns in the main table below
     ws.cell(2, 1, "SAP's own ratings next to ours. Bold results are worth a look. "
                   "Dots show how sure we are: "
                   f"{xs.DOT * 3} High, {xs.DOT * 2}{xs.EMPTY} Medium, {xs.DOT}{xs.EMPTY * 2} Low."

@@ -281,10 +281,14 @@ class SapVsUsTests(unittest.TestCase):
             if name.startswith("Reviewer note"):
                 self.assertTrue(ws.column_dimensions[get_column_letter(headers.index(name) + 1)].hidden, name)
 
-        # No solid fills and no matching jargon in anything a reader can see.
+        # Fills only on the title band and the two header rows; no matching jargon in anything visible.
         for row in ws.iter_rows():
             for cell in row:
-                self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
+                if cell.row in (1, hdr_row) or (cell.row == 4 and cell.column <= 6):
+                    self.assertEqual(cell.fill.fill_type, "solid", cell.coordinate)
+                    self.assertTrue(str(cell.fill.start_color.rgb).endswith("1F3864"), cell.coordinate)
+                else:
+                    self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
                 if cell.value is not None and not ws.column_dimensions[cell.column_letter].hidden:
                     for jargon in ("Decision", "p=", "overlap"):
                         self.assertNotIn(jargon, str(cell.value), cell.coordinate)
@@ -346,13 +350,24 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
             self.assertEqual(ws.sheet_view.zoomScale, 100, ws.title)
             self.assertFalse(ws.sheet_view.showGridLines, ws.title)
 
-    def test_table_headers_are_bold_without_fill(self):
+    def test_table_headers_are_navy_with_bold_white_text(self):
         ws = self.wb["All Findings"]
         for cell in ws[1]:
             self.assertTrue(cell.font.b)
             self.assertEqual(cell.font.name, "Aptos")
-            self.assertIn(cell.fill.fill_type, (None, ""))
-            self.assertEqual(cell.border.bottom.style, "medium")
+            self.assertEqual(cell.font.color.rgb[-6:], "FFFFFF")
+            self.assertEqual(cell.fill.fill_type, "solid")
+            self.assertEqual(cell.fill.start_color.rgb[-6:], "1F3864")
+            self.assertEqual(cell.border.bottom.style, "thin")
+            self.assertEqual(cell.border.bottom.color.rgb[-6:], "1F3864")
+
+    def test_section_tab_back_link_is_a_navy_band_with_white_link(self):
+        ws = self.wb.worksheets[2]  # first section tab after the front tabs
+        while ws["A1"].value != "← Executive Summary":
+            ws = self.wb.worksheets[self.wb.worksheets.index(ws) + 1]
+        self.assertEqual(ws["A1"].fill.start_color.rgb[-6:], "1F3864")
+        self.assertEqual(ws["A1"].font.color.rgb[-6:], "FFFFFF")
+        self.assertIsNotNone(ws["A1"].hyperlink)
 
     def test_no_cambria_and_header_not_blue(self):
         for ws in self.wb.worksheets:
@@ -440,8 +455,11 @@ class ExecutiveSummaryStyleTests(unittest.TestCase):
 
     def test_kpi_tiles_have_no_fill(self):
         ws = self._sheet(build_result())
+        navy_rows = {1} | {c.row for row in ws.iter_rows() for c in row if c.value == "Worst severity"}
         for row in ws.iter_rows():
             for cell in row:
+                if cell.row in navy_rows:
+                    continue
                 self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
 
 

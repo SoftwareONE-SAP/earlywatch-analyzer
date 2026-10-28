@@ -1,4 +1,4 @@
-"""Whole-workbook checks for the "minimal report" look: no fills, one font, plain view."""
+"""Whole-workbook checks for the polished minimal look: navy frame only, one font, plain view."""
 from __future__ import annotations
 
 import sys
@@ -64,10 +64,44 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
 
-    def test_no_solid_fills_anywhere(self):
+    def _navy_rows(self, ws):
+        """Title-band rows and table-header rows: the only rows allowed to have a fill."""
+        rows = set()
+        if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE"):
+            rows.add(1)
+        if str(ws["A1"].value).startswith("←"):
+            rows.add(1)  # back-link band on section tabs
+        if ws.freeze_panes:
+            rows.add(ws[ws.freeze_panes].row - 1)  # main table header
+        for row in ws.iter_rows():
+            values = [c.value for c in row if c.value is not None]
+            if "Worst severity" in values or "Alerts" in values:  # Exec Summary / SAP vs Us tables
+                rows.add(row[0].row)
+        return rows
+
+    def test_fills_only_navy_on_title_bands_and_header_rows(self):
+        for ws in self.wb.worksheets:
+            navy_rows = self._navy_rows(ws)
+            for cell in ws._cells.values():
+                where = f"{ws.title}!{cell.coordinate}"
+                if cell.fill.fill_type in (None, ""):
+                    continue
+                self.assertEqual(cell.fill.fill_type, "solid", where)
+                self.assertEqual(cell.fill.start_color.rgb[-6:], "1F3864", where)
+                self.assertIn(cell.row, navy_rows, where)
+
+    def test_every_navy_header_cell_has_white_text(self):
         for ws in self.wb.worksheets:
             for cell in ws._cells.values():
-                self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
+                if cell.fill.fill_type == "solid" and cell.value is not None:
+                    self.assertEqual(cell.font.color.rgb[-6:], "FFFFFF", f"{ws.title}!{cell.coordinate}")
+
+    def test_body_cells_have_no_fill(self):
+        for ws in self.wb.worksheets:
+            navy_rows = self._navy_rows(ws)
+            for cell in ws._cells.values():
+                if cell.row not in navy_rows:
+                    self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
 
     def test_every_font_is_aptos_including_rich_text_runs(self):
         for ws in self.wb.worksheets:

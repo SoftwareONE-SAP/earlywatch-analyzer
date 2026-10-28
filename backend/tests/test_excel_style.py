@@ -25,13 +25,16 @@ class ExcelStyleTests(unittest.TestCase):
         f = xs.font(bold=True)
         self.assertEqual((f.name, f.sz, f.b), (xs.FONT_NAME, 11, True))
 
-    def test_header_row_has_no_fill_and_medium_border(self):
+    def test_header_row_is_navy_with_white_text_and_thin_navy_border(self):
         ws = xs.init_workbook().active
         xs.header_row(ws, 1, ["Name", "Count"], numeric_cols=(2,))
         a, b = ws["A1"], ws["B1"]
         self.assertTrue(a.font.b)
-        self.assertIn(a.fill.fill_type, (None, ""))
-        self.assertEqual(a.border.bottom.style, "medium")
+        self.assertEqual(a.font.color.rgb[-6:], "FFFFFF")
+        self.assertEqual(a.fill.fill_type, "solid")
+        self.assertEqual(a.fill.start_color.rgb[-6:], "1F3864")
+        self.assertEqual(a.border.bottom.style, "thin")
+        self.assertEqual(a.border.bottom.color.rgb[-6:], "1F3864")
         self.assertEqual(a.alignment.horizontal, "left")
         self.assertEqual(b.alignment.horizontal, "right")
 

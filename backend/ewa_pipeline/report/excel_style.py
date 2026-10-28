@@ -1,12 +1,13 @@
 """Shared look and feel for the Excel report ("minimal report" style).
 
-Plain, quiet styling: one font, no fills, thin grey row lines, coloured dots
-instead of coloured cells. Everything here is presentation only.
+Plain, quiet styling: one font, no fills in the body, thin grey row lines,
+coloured dots instead of coloured cells. The only fills are a navy frame:
+title bands and table header rows. Everything here is presentation only.
 """
 from __future__ import annotations
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.indexed_list import IndexedList
 
@@ -27,7 +28,7 @@ MUTED = "808080"
 NOTE = "595959"
 LINK = "0563C1"
 NAVY = "1F3864"
-HEADER_LINE = "262626"
+WHITE = "FFFFFF"
 ROW_LINE = "D9D9D9"
 EMPTY_DOT = "BFBFBF"
 
@@ -71,13 +72,27 @@ def _bottom(style, color) -> Border:
     return Border(bottom=Side(style=style, color=color))
 
 
+def navy_fill() -> PatternFill:
+    return PatternFill("solid", start_color=NAVY, end_color=NAVY)
+
+
+def title_band(ws, row, first_col, last_col, size=16, bold=True, underline=None) -> None:
+    """Navy band across first_col..last_col on one row; any text in it becomes white."""
+    for col in range(first_col, last_col + 1):
+        c = ws.cell(row=row, column=col)
+        c.fill = navy_fill()
+        if c.value is not None:
+            c.font = font(bold=bold, size=size, color=WHITE, underline=underline)
+
+
 def header_row(ws, row, values, start_col=1, numeric_cols=()) -> None:
-    """Bold header text, no fill, medium dark line underneath."""
+    """Navy fill, bold white text, thin navy line underneath."""
     for i, val in enumerate(values):
         col = start_col + i
         c = ws.cell(row=row, column=col, value=val)
-        c.font = font(bold=True)
-        c.border = _bottom("medium", HEADER_LINE)
+        c.font = font(bold=True, color=WHITE)
+        c.fill = navy_fill()
+        c.border = _bottom("thin", NAVY)
         c.alignment = Alignment(
             horizontal="right" if col in numeric_cols else "left", vertical="top", wrap_text=True
         )
