@@ -186,6 +186,8 @@ All configuration is via environment variables — see `.env.example` for the fu
 python -m ewa_pipeline alert-replay --result output/X_result.json --tree output/X.compact_tree.json --scores output/X_d1_scores.json --labels output/X_alert_summary.csv --keep 0.85
 ```
 
+**Same-statement check.** SAP's alert text never names a SQL statement, but SAP's report has a section for the alert that lists the statement IDs (32 hex characters). After the heading check, a plain-Python step finds that section by its wording, reads the IDs, and looks at the chosen finding. If the finding names none of those IDs but another candidate (score at or above `DECISION_POSSIBLE`) does, the report uses the candidate with the highest score and names the first pick as "also close, please check". If no such candidate exists, nothing changes. It makes no extra AI calls, and `alert-replay` includes it in the "after" result.
+
 The model clients retry failed requests up to three times by default. A YAML
 configuration can set `max_model_retries`, the timeouts, and `max_concurrency`;
 explicit YAML runtime values take precedence over environment values. Reasoning
