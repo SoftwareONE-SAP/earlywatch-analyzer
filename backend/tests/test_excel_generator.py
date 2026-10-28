@@ -255,6 +255,53 @@ class SapVsUsTests(unittest.TestCase):
         self.assertNotIn("No Issues Found", self._generate(result).sheetnames)
 
 
+class MinimalReportBaseStyleTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        generate(build_result(), path)
+        self.wb = load_workbook(path)
+
+    def test_every_tab_is_plain_100_percent_no_gridlines(self):
+        for ws in self.wb.worksheets:
+            self.assertEqual(ws.sheet_view.zoomScale, 100, ws.title)
+            self.assertFalse(ws.sheet_view.showGridLines, ws.title)
+
+    def test_table_headers_are_bold_without_fill(self):
+        ws = self.wb["All Findings"]
+        for cell in ws[1]:
+            self.assertTrue(cell.font.b)
+            self.assertEqual(cell.font.name, "Aptos")
+            self.assertIn(cell.fill.fill_type, (None, ""))
+            self.assertEqual(cell.border.bottom.style, "medium")
+
+    def test_no_cambria_and_header_not_blue(self):
+        for ws in self.wb.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    if cell.value is not None:
+                        self.assertNotEqual(cell.font.name, "Cambria")
+                        self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
+
+    def test_only_front_tabs_have_navy_tab_colour(self):
+        front = {"Executive Summary", "All Findings", "SAP vs Us", "No Issues Found"}
+        for ws in self.wb.worksheets:
+            colour = ws.sheet_properties.tabColor
+            if ws.title in front:
+                self.assertTrue(colour is not None and colour.rgb.endswith("1F3864"), ws.title)
+            else:
+                self.assertIsNone(colour, ws.title)
+
+    def test_print_setup_a4_landscape_one_page_wide(self):
+        ws = self.wb["All Findings"]
+        self.assertEqual(ws.page_setup.orientation, "landscape")
+        self.assertEqual(int(ws.page_setup.paperSize), 9)
+        self.assertEqual(ws.page_setup.fitToWidth, 1)
+        self.assertEqual(ws.print_title_rows, "$1:$1")
+        self.assertEqual(self.wb["Performance Indicators"].print_title_rows, "$2:$2")
+
+
 def _finding(fid: str, severity: str) -> Finding:
     return Finding(
         id=fid, title=f"Finding {fid}", severity=severity,

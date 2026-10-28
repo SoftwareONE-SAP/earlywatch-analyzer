@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report.schemas import (
     AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow,
 )
@@ -15,14 +16,9 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 
-_F_HDR  = "Cambria"   # header font
-_F_BODY = "Calibri"   # body font
 _SZ     = 11          # body size
 
-_C_HDR_BG   = "4472C4"
-_C_HDR_FG   = "FFFFFF"
-_C_ALT      = "F2F2F2"
-_C_LINK     = "4472C4"
+_C_LINK     = xs.LINK
 _C_TITLE_BG = "1F4E79"
 _C_BORDER   = "BFBFBF"
 
@@ -43,21 +39,12 @@ _VERDICT_BG = {
 }
 _VERDICT_DEFAULT_BG = "D9D9D9"
 
-# Tab colours
-_TAB_EXEC = _C_TITLE_BG
-_TAB_XREF = "7030A0"
-_TAB_REM  = "2E75B6"
-_TAB_UTIL = "808080"
-
 _NUM = '#,##0'
 
 # ── Style helpers ─────────────────────────────────────────────────────────────
 
-def _font(bold=False, size=_SZ, color="000000", italic=False):
-    return Font(name=_F_BODY, bold=bold, size=size, color=color, italic=italic)
-
-def _hdr_font(color=_C_HDR_FG, size=_SZ):
-    return Font(name=_F_HDR, bold=True, size=size, color=color)
+def _font(bold=False, size=xs.BODY_SIZE, color=xs.TEXT, italic=False):
+    return xs.font(bold=bold, size=size, color=color, italic=italic)
 
 def _fill(hex_color):
     return PatternFill("solid", fgColor=hex_color)
@@ -68,21 +55,14 @@ def _align(h="left", v="center", wrap=False):
 def _border_bottom(color=_C_BORDER):
     return Border(bottom=Side(style="thin", color=color))
 
-def _apply_app_style(ws, *, hide_headers=False, zoom=110):
-    """Hide gridlines (and optionally row/col headers) and set zoom."""
-    ws.sheet_view.showGridLines = False
+def _apply_app_style(ws, *, hide_headers=False):
+    """Plain view: 100% zoom, no gridlines. Freeze and print setup happen at the end of generate()."""
+    xs.apply_sheet_view(ws)
     if hide_headers:
         ws.sheet_view.showRowColHeaders = False
-    ws.sheet_view.zoomScale = zoom
 
-def _hdr_row(ws, row, values, bg=_C_HDR_BG, fg=_C_HDR_FG, start_col=1):
-    for i, val in enumerate(values):
-        col = start_col + i
-        c = ws.cell(row=row, column=col, value=val)
-        c.font = _hdr_font(color=fg)
-        c.fill = _fill(bg)
-        c.alignment = _align(h="center")
-        c.border = _border_bottom()
+def _hdr_row(ws, row, values, start_col=1):
+    xs.header_row(ws, row, values, start_col=start_col)
 
 def _sheet_ref(name: str) -> str:
     import re as _re
@@ -108,7 +88,7 @@ def _kpi_tile(ws, top_left, bottom_right, label, value, bg, fg="FFFFFF"):
     c = ws[top_left]
     c.value = f"{label}\n{value}"
     c.fill = _fill(bg)
-    c.font = Font(name=_F_HDR, bold=True, size=18, color=fg)
+    c.font = xs.font(bold=True, size=18, color=fg)
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 def _worst_severity(findings):
@@ -123,8 +103,7 @@ def _worst_severity(findings):
 
 def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     ws = wb.create_sheet("Executive Summary")
-    _apply_app_style(ws, hide_headers=True, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_EXEC
+    _apply_app_style(ws, hide_headers=True)
 
     # Margin columns A and I
     ws.column_dimensions["A"].width = 2
@@ -143,7 +122,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     ws.merge_cells("B1:H1")
     c = ws["B1"]
     c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
-    c.font = Font(name=_F_HDR, bold=True, size=18, color="FFFFFF")
+    c.font = xs.font(bold=True, size=18, color="FFFFFF")
     c.fill = _fill(_C_TITLE_BG)
     c.alignment = _align(h="center")
 
@@ -153,7 +132,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     ws.merge_cells("B2:H2")
     c = ws["B2"]
     c.value = f"Overall System Health:  {str(health).upper()}"
-    c.font = Font(name=_F_HDR, bold=True, size=13, color="FFFFFF")
+    c.font = xs.font(bold=True, size=13, color="FFFFFF")
     c.fill = _fill(_HEALTH_BG.get(health, "888888"))
     c.alignment = _align(h="center")
 
@@ -177,12 +156,11 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     # Top 5 Priority Actions header
     r = 8
     c = ws.cell(row=r, column=2, value="Top 5 Priority Actions")
-    c.font = Font(name=_F_HDR, bold=True, size=13, color=_C_TITLE_BG)
+    c.font = xs.font(bold=True, size=13, color=_C_TITLE_BG)
     c.border = _border_bottom(_C_TITLE_BG)
     ws.merge_cells(f"B{r}:H{r}")
     for col in range(2, 9):
         ws.cell(row=r, column=col).border = _border_bottom(_C_TITLE_BG)
-    ws.row_dimensions[r].height = 22
 
     r += 1
     for i, action in enumerate(result.top_5_priority_actions, 1):
@@ -192,10 +170,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         c.font = _font()
         c.alignment = _align(wrap=True, v="top")
         ws.merge_cells(f"C{r}:H{r}")
-        if i % 2 == 1:
-            for col in range(2, 9):
-                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
-        ws.row_dimensions[r].height = 50
+        ws.row_dimensions[r].height = 15 * max(1, -(-len(str(action)) // 90))
         r += 1
 
     # Spacer
@@ -206,7 +181,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     tbl_hdr_row = r
     col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
     _hdr_row(ws, tbl_hdr_row, col_headers, start_col=2)
-    ws.row_dimensions[tbl_hdr_row].height = 24
     ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
     # Worst section first: by worst severity, then most findings, then original order.
@@ -244,14 +218,10 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
             ws.cell(row=r, column=col).alignment = _align(h="center")
             ws.cell(row=r, column=col).font = _font()
 
-        if idx % 2 == 0:
-            for col in range(2, 9):
-                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
         # Severity colour overrides alt shade (blank cell keeps the alt shade)
         if worst:
             hc.fill = _fill(_SEV_BG[worst])
 
-        ws.row_dimensions[r].height = 22
         r += 1
 
     _autofit_columns(ws, min_width=8, max_width=45, skip_cols=(1, 9))
@@ -259,8 +229,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
 
 def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     ws = wb.create_sheet(sheet_name)
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _HEALTH_BG.get(da.overall_health, _TAB_UTIL)
+    _apply_app_style(ws)
 
     # Columns A (ID) and B (Severity) must stay first: the Executive Summary
     # counts findings with formulas over those two columns. New columns go last.
@@ -279,7 +248,6 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
 
     # Row 2: column headers
     _hdr_row(ws, 2, COLS)
-    ws.row_dimensions[2].height = 24
     ws.freeze_panes = "A3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(COLS))}2"
 
@@ -300,9 +268,6 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
             c.font = _font()
             c.alignment = _align(wrap=(col in wrap_cols))
 
-        if i % 2 == 1:
-            for col in range(1, len(COLS) + 1):
-                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
 
         sev = f.severity
         ws.cell(row=r, column=2).fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
@@ -315,8 +280,7 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
 def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     """One flat, filterable table of every finding, worst first."""
     ws = wb.create_sheet("All Findings")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_EXEC
+    _apply_app_style(ws)
 
     COLS = [
         "Finding ID", "Section", "Severity", "Risk Type", "Title",
@@ -326,7 +290,6 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     ]
     wrap_cols = (5, 6, 7, 9, 10, 11, 12, 13)
     _hdr_row(ws, 1, COLS)
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
 
@@ -352,9 +315,6 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
             c.font = _font()
             c.alignment = _align(v="top", wrap=(col in wrap_cols))
 
-        if i % 2 == 1:
-            for col in range(1, len(COLS) + 1):
-                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
 
         # Finding ID links to the finding's row on its section sheet.
         sname = sheet_map.get(da.section_id)
@@ -375,8 +335,7 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
 def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str]):
     """SAP's own ratings next to ours: verdict counts on top, one row per alert/check below."""
     ws = wb.create_sheet("SAP vs Us")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_XREF
+    _apply_app_style(ws)
 
     # Summary block: verdict counts, split by Alerts and Checks.
     verdicts: list[str] = []
@@ -401,7 +360,6 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     COLS = ["Source", "SAP Topic", "SAP Item", "SAP Rating", "Our Section", "Our Rating",
             "Our Finding IDs", "Verdict", "Reason", "Match score", "Matched by"]
     _hdr_row(ws, hdr, COLS)
-    ws.row_dimensions[hdr].height = 24
     ws.freeze_panes = f"A{hdr + 1}"
     ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(COLS))}{hdr}"
 
@@ -414,9 +372,6 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
             c = ws.cell(r, col, val)
             c.font = _font()
             c.alignment = _align(v="top", wrap=(col in (2, 3, 5, 9)))
-        if i % 2 == 1:
-            for col in range(1, len(COLS) + 1):
-                ws.cell(r, col).fill = _fill(_C_ALT)
 
         sname = sheet_map.get(row.our_section_id)
         if sname:
@@ -455,10 +410,8 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
             sap_rating[row.our_section_id] = row.sap_rating
 
     ws = wb.create_sheet("No Issues Found")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _HEALTH_BG["Healthy"]
+    _apply_app_style(ws)
     _hdr_row(ws, 1, ["Section", "SAP rating", "Note"])
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = "A1:C1"
 
@@ -469,9 +422,6 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
         ws.cell(r, 1, f"{cov.section_id} {cov.section_title}".strip()).font = _font()
         ws.cell(r, 2, rating).font = _font()
         ws.cell(r, 3, note).font = _font(bold=bool(note))
-        if i % 2 == 1:
-            for col in range(1, 4):
-                ws.cell(r, col).fill = _fill(_C_ALT)
         if rating in _RATING_BG:
             c = ws.cell(r, 2)
             c.fill = _fill(_RATING_BG[rating])
@@ -484,12 +434,10 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
 
 def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
     ws = wb.create_sheet("Cross-References")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_XREF
+    _apply_app_style(ws)
 
     COLS = ["Title", "Related Findings", "Correlation", "Combined Impact", "Recommended Action"]
     _hdr_row(ws, 1, COLS)
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(5)}1"
 
@@ -506,17 +454,13 @@ def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
             c.alignment = _align(wrap=True)
-        if i % 2 == 1:
-            for col in range(1, 6):
-                ws.cell(row=r, column=col).fill = _fill(_C_ALT)
 
     _autofit_columns(ws, min_width=10, max_width=55)
 
 
 def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
     ws = wb.create_sheet("Remediation Plan")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_REM
+    _apply_app_style(ws)
 
     COLS = [
         "Finding ID", "Section", "Severity", "Title", "Action", "Transactions",
@@ -524,7 +468,6 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
         "Validation Query",
     ]
     _hdr_row(ws, 1, COLS)
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
 
@@ -551,9 +494,6 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
             c.font = _font()
             c.alignment = _align(wrap=(col in (5, 6, 10, 11)))
 
-        if i % 2 == 1:
-            for col in range(1, len(COLS) + 1):
-                ws.cell(r, col).fill = _fill(_C_ALT)
 
         sev = vals[2]
         ws.cell(r, 3).fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
@@ -565,11 +505,9 @@ def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
 
 def _build_document_structure(wb: Workbook, tree: dict):
     ws = wb.create_sheet("Document Structure")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_UTIL
+    _apply_app_style(ws)
 
     _hdr_row(ws, 1, ["Title", "Pages", "Summary", "Depth"])
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
 
     row = [2]
@@ -587,9 +525,6 @@ def _build_document_structure(wb: Workbook, tree: dict):
             c.font = _font()
             c.alignment = _align(wrap=True)
             ws.cell(r, 4, depth).font = _font()
-            if r % 2 == 0:
-                for col in range(1, 5):
-                    ws.cell(r, col).fill = _fill(_C_ALT)
             row[0] += 1
             _walk(n.get("nodes", []), depth + 1)
 
@@ -599,11 +534,9 @@ def _build_document_structure(wb: Workbook, tree: dict):
 
 def _build_token_usage(wb: Workbook, usage: TokenUsage):
     ws = wb.create_sheet("Token Usage")
-    _apply_app_style(ws, zoom=110)
-    ws.sheet_properties.tabColor = _TAB_UTIL
+    _apply_app_style(ws)
 
     _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Cached Input", "Cache Write", "Billable Input", "Output Tokens", "Total Tokens"])
-    ws.row_dimensions[1].height = 24
     ws.freeze_panes = "A2"
 
     data_rows = [
@@ -624,9 +557,6 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
         c = ws.cell(r, 8, f"=C{r}+G{r}")
         c.number_format = _NUM
         c.font = _font()
-        if i % 2 == 1:
-            for col in range(1, 8):
-                ws.cell(r, col).fill = _fill(_C_ALT)
 
     tr = 2 + len(data_rows)
     ws.cell(tr, 1, "TOTAL").font = _font(bold=True)
@@ -644,10 +574,23 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
     _autofit_columns(ws, min_width=8, max_width=40)
 
 
+# ── Final pass over every tab ─────────────────────────────────────────────────
+
+# The five front tabs get the navy tab colour; every other tab has none.
+_FRONT_TABS = set(xs.FRONT_TABS) | {"SAP vs Us"}
+
+def _finish_sheets(wb: Workbook) -> None:
+    """Tab colour policy and print setup. Freeze panes were set by each builder."""
+    for ws in wb.worksheets:
+        ws.sheet_properties.tabColor = xs.NAVY if ws.title in _FRONT_TABS else None
+        freeze = ws.freeze_panes
+        header_row = int("".join(ch for ch in freeze if ch.isdigit())) - 1 if freeze else None
+        xs.apply_print_setup(ws, repeat_row=header_row or None)
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None) -> None:
-    wb = Workbook()
+    wb = xs.init_workbook()
     wb.remove(wb.active)
 
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
@@ -709,6 +652,8 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
                 cell.alignment = _align(wrap=True)
         ws.freeze_panes = "A2"
         _autofit_columns(ws, min_width=10, max_width=55)
+
+    _finish_sheets(wb)
 
     # Open on the dashboard
     wb.active = 0
