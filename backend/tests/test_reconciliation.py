@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ewa_pipeline.report.reconciliation import clean_title, reconcile
+from ewa_pipeline.report.reconciliation import (
+    _heading_paths,
+    _heading_score,
+    _heading_words,
+    _words,
+    clean_title,
+    reconcile,
+)
 from ewa_pipeline.report.schemas import (
     AnalysisResult,
     DomainAnalysis,
@@ -250,6 +257,111 @@ class DecisionAlertTests(unittest.TestCase):
     def test_unknown_finding_ids_are_ignored(self):
         row = self.run_alert("Backups are stale", {"GONE": 0.99})
         self.assertEqual((row.verdict, row.match_method), ("Not covered", ""))
+
+
+class HeadingHelperTests(unittest.TestCase):
+    def test_parent_heading_counts(self):
+        tree = {"structure": [node("0001", "Top", [node("0002", "Mid heading", [node("0003", "Leaf")])])]}
+        paths = _heading_paths(tree)
+        self.assertEqual(paths["0003"], ["Top", "Mid heading", "Leaf"])
+        self.assertEqual(paths["0001"], ["Top"])
+        words = _words("Users with critical authorizations which should not be used in production")
+        score, title = _heading_score(
+            words, ["Top", "Critical authorizations, which should not be used in production", "Leaf"]
+        )
+        self.assertEqual((score >= 3, title), (True, "Critical authorizations, which should not be used in production"))
+
+    def test_number_prefix_and_sid_are_ignored(self):
+        self.assertEqual(
+            _heading_words("4.2 Kernel Patch Level for TP1", "TP1", "H4P"), {"kernel", "patch", "level"}
+        )
+        score, _ = _heading_score({"kernel", "patch", "level"}, ["4.2 Kernel Patch Level for TP1"], "TP1", "H4P")
+        self.assertEqual(score, 3)
+
+    def test_filler_words_alone_score_zero(self):
+        alert = _words("SAP HANA database: Recommended Audit configuration is not applied.")
+        self.assertEqual(_heading_score(alert, ["SAP HANA Database TP1"], "TP1", "H4P"), (0, ""))
+        # Only "configuration" survives from this heading, so it is not a hit either.
+        self.assertEqual(_heading_score(alert, ["SAP HANA Database Configuration"]), (0, ""))
+
+    def test_two_shared_words_is_not_a_hit(self):
+        self.assertEqual(_heading_score({"backup", "catalog"}, ["Backup catalog"]), (0, ""))
+
+    def test_heading_only_half_in_alert_is_not_a_hit(self):
+        alert = {"critical", "authorizations", "which"}
+        self.assertEqual(_heading_score(alert, ["Critical authorizations which allow anything goes"]), (0, ""))
+
+
+class HeadingCheckTests(unittest.TestCase):
+    """The heading check re-ranks Decision-1's own scores; nothing here touches the network."""
+
+    TREE = {"structure": [
+        node("0060", "5 Users with Critical Authorizations", [
+            node("0068", "5.1 Critical authorizations, which allow to do anything", [
+                node("0069", "5.1.1 Super User Accounts"),
+            ]),
+            node("0071", "5.2 Critical authorizations, which should not be used in production", [
+                node("0072", "5.2.1 Users Authorized to Change or Display all Tables"),
+            ]),
+        ]),
+        node("0080", "6 SAP HANA Database Configuration"),
+        node("0081", "7 SAP HANA Database Audit"),
+    ]}
+    BSW4 = ("Users with critical authorizations, which should not be used in production "
+            "in other client(s) than 000")
+    BSW2 = "Users with critical authorizations, which allow to do anything in client 000"
+
+    def setUp(self):
+        self.a = finding("A-1", "High", "Super User Accounts have critical authorizations")
+        self.b = finding("B-1", "Medium", "Users can change or display all tables")
+        self.cfg = finding("C-1", "Low", "HANA database configuration drifts")
+        self.audit = finding("D-1", "High", "Audit trail is not switched on")
+        self.result = make_result(
+            [analysis("0069", self.a), analysis("0072", self.b), analysis("0080", self.cfg),
+             analysis("0081", self.audit)],
+            [cover("0069"), cover("0072"), cover("0080"), cover("0081")],
+        )
+
+    def run_alert(self, text, scores, **kwargs):
+        summary = SapServiceSummary(alerts=[SapAlert(rating="RED", text=text)])
+        return reconcile(self.result, summary, self.TREE, PROFILE, alert_scores={0: scores}, **kwargs)[0]
+
+    def test_switches_to_finding_under_the_alerts_own_heading(self):
+        row = self.run_alert(self.BSW4, {"A-1": 0.97, "B-1": 0.75})
+        self.assertEqual(row.finding_ids, ["B-1"])
+        self.assertEqual((row.match_method, row.match_score), ("Report heading", 0.75))
+        self.assertEqual(row.our_section_id, "0072")
+        self.assertIn("also close, please check: A-1 'Super User Accounts have critical authorizations' (p=0.97)",
+                      row.reason)
+        self.assertIn('heading "5.2 Critical authorizations, which should not be used in production"', row.reason)
+
+    def test_correct_top_pick_is_kept(self):
+        row = self.run_alert(self.BSW2, {"A-1": 0.97, "B-1": 0.75})
+        self.assertEqual((row.finding_ids, row.match_method), (["A-1"], "Decision-1"))
+
+    def test_weak_candidate_is_ignored(self):
+        row = self.run_alert(self.BSW4, {"A-1": 0.97, "B-1": 0.40})
+        self.assertEqual((row.finding_ids, row.match_method), (["A-1"], "Decision-1"))
+
+    def test_below_keep_is_untouched(self):
+        scores = {"A-1": 0.70, "B-1": 0.69}
+        with_check = self.run_alert(self.BSW4, scores)
+        without = self.run_alert(self.BSW4, scores, heading_check=False)
+        self.assertEqual(with_check, without)
+        self.assertNotEqual(with_check.match_method, "Report heading")
+
+    def test_filler_word_heading_does_not_beat_the_top_pick(self):
+        text = "SAP HANA database: Recommended Audit configuration is not applied."
+        row = self.run_alert(text, {"D-1": 0.95, "C-1": 0.90})
+        self.assertEqual((row.finding_ids, row.match_method), (["D-1"], "Decision-1"))
+
+    def test_switch_off_gives_identical_rows(self):
+        for text, scores in ((self.BSW4, {"A-1": 0.97, "B-1": 0.75}), (self.BSW2, {"A-1": 0.97, "B-1": 0.75})):
+            off = self.run_alert(text, scores, heading_check=False)
+            self.assertEqual(off.match_method, "Decision-1")
+            self.assertEqual(off.finding_ids, ["A-1"])
+        on = self.run_alert(self.BSW2, {"A-1": 0.97, "B-1": 0.75})
+        self.assertEqual(on, self.run_alert(self.BSW2, {"A-1": 0.97, "B-1": 0.75}, heading_check=False))
 
 
 class EdgeCaseTests(unittest.TestCase):

@@ -69,6 +69,8 @@ def _candidate(row: ReconciliationRow, findings_by_id: dict) -> str:
 
 def _alert_how_sure(row: ReconciliationRow) -> str:
     """Confidence for an alert that was matched to a finding."""
+    if row.match_method == "Report heading":
+        return "Medium"
     reason = row.reason or ""
     m = _D1_RE.search(reason)
     if row.match_method == "Decision-1" or m:
@@ -108,6 +110,8 @@ def describe(row: ReconciliationRow, findings_by_id: dict) -> RowDisplay:
     result = _RESULT_BY_VERDICT.get(verdict, verdict or RESULT_NO_DETAIL)
     sure = _alert_how_sure(row)
     text = _matched_sentence(verdict, sap, ours, _finding_label(row, findings_by_id))
+    if row.match_method == "Report heading":
+        text += " We chose it because it sits under the report heading that uses SAP's own wording."
     extra = _candidate(row, findings_by_id)
     if extra and ("also close" in reason or "Decision-1 possible match" in reason):
         text += f" Another finding may also relate: {extra}."

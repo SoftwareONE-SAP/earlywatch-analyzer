@@ -149,6 +149,64 @@ class TrialTests(unittest.TestCase):
         self.assertEqual(body["questions"]["answer"]["instructions"], T.QUESTION)
 
 
+def replay_inputs():
+    def node(node_id, title, children=()):
+        return {"node_id": node_id, "title": title, "nodes": list(children)}
+
+    tree = {"structure": [node("0060", "5 Users with Critical Authorizations", [
+        node("0068", "5.1 Critical authorizations, which allow to do anything", [node("0069", "5.1.1 Super Users")]),
+        node("0071", "5.2 Critical authorizations, which should not be used in production",
+             [node("0072", "5.2.1 Table access")]),
+    ])]}
+    result = {
+        "domain_analyses": [
+            {"section_title": "Super Users", "section_id": "0069", "overall_health": "Critical",
+             "findings": [finding("A-1", "SAP_ALL is assigned broadly")]},
+            {"section_title": "Table access", "section_id": "0072", "overall_health": "Warning",
+             "findings": [finding("B-1", "Broad table access is assigned", severity="Medium")]},
+        ],
+        "cross_references": [], "executive_summary": "e", "overall_system_health": "Critical",
+        "top_5_priority_actions": [], "token_usage": {},
+        "sap_summary": {"alerts": [
+            {"rating": "RED", "text": "Users with critical authorizations, which should not be used in "
+                                      "production in other client(s) than 000"},
+            {"rating": "RED", "text": "Users with critical authorizations, which allow to do anything in client 000"},
+        ], "checks": []},
+    }
+    saved = {"1|A-1": 0.97, "1|B-1": 0.75, "2|A-1": 0.97, "2|B-1": 0.75}
+    return result, tree, saved
+
+
+class ReplayTests(unittest.TestCase):
+    def test_heading_check_makes_one_more_alert_right(self):
+        result, tree, saved = replay_inputs()
+        board = T.replay_board(result, tree, saved, {1: {"B-1"}, 2: {"A-1"}}, keep=0.85, possible=0.5)
+        self.assertEqual(board["before"], {"right": 1, "wrong": 1, "missed": 0, "correct_none": 0})
+        self.assertEqual(board["after"], {"right": 2, "wrong": 0, "missed": 0, "correct_none": 0})
+        self.assertEqual(board["changed"], [(1, "A-1", "B-1")])
+        self.assertIn("A-1 -> B-1", T.format_replay(board))
+
+    def test_command_prints_both_boards_and_writes_nothing(self):
+        result, tree, saved = replay_inputs()
+        with TemporaryDirectory() as tmp:
+            paths = {}
+            for name, data in (("result", result), ("tree", tree), ("scores", saved)):
+                paths[name] = Path(tmp) / f"{name}.json"
+                paths[name].write_text(json.dumps(data), encoding="utf-8")
+            labels = Path(tmp) / "labels.csv"
+            labels.write_text("alert_no,correct_finding_ids\n1,B-1\n2,A-1\n", encoding="utf-8")
+            before_files = sorted(p.name for p in Path(tmp).iterdir())
+            res = CliRunner().invoke(cli, [
+                "alert-replay", "--result", str(paths["result"]), "--tree", str(paths["tree"]),
+                "--scores", str(paths["scores"]), "--labels", str(labels), "--keep", "0.85", "--possible", "0.5",
+            ])
+            self.assertEqual(res.exit_code, 0, res.output)
+            self.assertIn("before", res.output)
+            self.assertIn("after", res.output)
+            self.assertIn("1: A-1 -> B-1", res.output)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), before_files)
+
+
 class CommandTests(unittest.TestCase):
     def run_cmd(self, args):
         config = make_config()

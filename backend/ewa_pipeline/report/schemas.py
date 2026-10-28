@@ -189,7 +189,7 @@ class ReconciliationRow(BaseModel):
     verdict: str = ""
     reason: str = ""
     match_score: float | None = None  # alerts only: Decision-1's p when match_method is "Decision-1", else word-overlap score
-    match_method: str = ""  # alerts only: "Decision-1", "Word overlap", or "" when not matched
+    match_method: str = ""  # alerts only: "Decision-1", "Report heading", "Word overlap", or "" when not matched
 
 
 class AnalysisResult(BaseModel):
