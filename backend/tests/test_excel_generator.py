@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 from ewa_pipeline.report.excel_generator import generate
 from ewa_pipeline.report.schemas import (
     AnalysisResult, DomainAnalysis, Finding, ReconciliationRow, Remediation, SectionCoverage,
+    SystemProfile,
 )
 from ewa_pipeline.tracking.token_tracker import TokenUsage
 
@@ -374,6 +375,47 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
         self.assertEqual(ws.page_setup.fitToWidth, 1)
         self.assertEqual(ws.print_title_rows, "$1:$1")
         self.assertEqual(self.wb["Performance Indicators"].print_title_rows, "$2:$2")
+
+
+class ExecutiveSummaryStyleTests(unittest.TestCase):
+    def _sheet(self, result):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        generate(result, path)
+        return load_workbook(path)["Executive Summary"]
+
+    def _texts(self, ws):
+        return [str(c.value) for row in ws.iter_rows() for c in row if c.value is not None]
+
+    def test_health_line_and_written_summary(self):
+        result = build_result()
+        result.executive_summary = "The system needs attention soon."
+        ws = self._sheet(result)
+        self.assertEqual(ws["B2"].value, "Overall system health: ● CRITICAL")
+        self.assertIn("The system needs attention soon.", self._texts(ws))
+
+    def test_system_profile_line(self):
+        result = build_result()
+        result.system_profile = SystemProfile(sid="PRD", product="SAP S/4HANA", product_version="2022",
+                                              period_start="01.05.2026", period_end="31.05.2026")
+        texts = self._texts(self._sheet(result))
+        line = next(t for t in texts if t.startswith("System PRD"))
+        self.assertIn("SAP S/4HANA 2022", line)
+        self.assertIn("01.05.2026", line)
+
+    def test_top_actions_numbered_once(self):
+        result = build_result()
+        result.top_5_priority_actions = ["1. Patch the kernel.", "2) Tune the statement."]
+        texts = self._texts(self._sheet(result))
+        self.assertIn("1. Patch the kernel.", texts)
+        self.assertIn("2. Tune the statement.", texts)
+
+    def test_kpi_tiles_have_no_fill(self):
+        ws = self._sheet(build_result())
+        for row in ws.iter_rows():
+            for cell in row:
+                self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
 
 
 def _finding(fid: str, severity: str) -> Finding:

@@ -169,6 +169,18 @@ def sure_dots(level):
     return CellRichText(*blocks)
 
 
+def dot_label(dot_colour, word, size=BODY_SIZE, word_colour=TEXT, bold=False, prefix=""):
+    """Optional plain prefix, a coloured dot, then a word, all at one size. Falls back to plain text."""
+    if not RICH:
+        return f"{prefix}{DOT} {word}"
+    blocks = []
+    if prefix:
+        blocks.append(TextBlock(_inline(word_colour, bold=bold, size=size), prefix))
+    blocks.append(TextBlock(_inline(dot_colour, bold=bold, size=size), DOT))
+    blocks.append(TextBlock(_inline(word_colour, bold=bold, size=size), f" {word}"))
+    return CellRichText(*blocks)
+
+
 def legend_line(label, note):
     """A dots-and-word label (from rating_text etc.) followed by a plain explanation, as one cell value."""
     if not RICH or not isinstance(label, CellRichText):

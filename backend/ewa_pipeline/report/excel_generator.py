@@ -2,6 +2,7 @@
 Deterministic Excel workbook generator for EWA analysis results.
 """
 
+import re
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -20,12 +21,9 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 _SZ     = 11          # body size
 
 _C_LINK     = xs.LINK
-_C_TITLE_BG = "1F4E79"
 _C_BORDER   = "BFBFBF"
 
-_SEV_BG = {"Critical": "C00000", "High": "ED7D31", "Medium": "FFC000", "Low": "548235"}
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
-_HEALTH_BG = {"Critical": "C00000", "Warning": "ED7D31", "Healthy": "548235"}
 
 # SAP's own traffic-light ratings, and the "SAP vs Us" verdict colours.
 _RATING_BG = {"RED": "C00000", "YELLOW": "FFC000", "GREEN": "548235"}
@@ -117,15 +115,6 @@ def _guidance_cell(c, required):
 def _link_font():
     return xs.font(color=_C_LINK, underline="single")
 
-def _kpi_tile(ws, top_left, bottom_right, label, value, bg, fg="FFFFFF"):
-    """Card-style KPI tile across a merged cell range."""
-    ws.merge_cells(f"{top_left}:{bottom_right}")
-    c = ws[top_left]
-    c.value = f"{label}\n{value}"
-    c.fill = _fill(bg)
-    c.font = xs.font(bold=True, size=18, color=fg)
-    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
 def _worst_severity(findings):
     """Most serious severity among findings, or None when there are none."""
     present = {f.severity for f in findings}
@@ -208,13 +197,50 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
             c.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
 
+_HEALTH_DOT = {"Critical": "C00000", "Warning": "E0A000", "Healthy": "548235"}
+
+
+def _text_lines(text, per_line=100) -> int:
+    """Rough number of wrapped lines a text needs (merged cells do not auto-fit)."""
+    return max(1, sum(max(1, -(-len(part) // per_line)) for part in str(text).split("\n")))
+
+
+def _profile_line(profile) -> str:
+    """One quiet line about the analysed system, built from whatever is known."""
+    if profile is None:
+        return ""
+    parts = []
+    if profile.sid:
+        parts.append(f"System {profile.sid}")
+    for name, version in ((profile.product, profile.product_version),
+                          (profile.database, profile.database_version)):
+        text = " ".join(p for p in (name, version) if p)
+        if text:
+            parts.append(text)
+    if profile.os:
+        parts.append(profile.os)
+    if profile.system_role:
+        parts.append(profile.system_role)
+    if profile.period_start and profile.period_end:
+        parts.append(f"Period {profile.period_start} {xs.DASH} {profile.period_end}")
+    elif profile.period_start or profile.period_end:
+        parts.append(f"Period {profile.period_start or profile.period_end}")
+    return "  ·  ".join(parts)
+
+
+def _clean_action(text) -> str:
+    """Drop a leading "1." / "2)" / bullet: the numbering is added by the workbook."""
+    return re.sub(r"^\s*(?:\d+\s*[.)]|[-•*])\s*", "", str(text)).strip()
+
+
 def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     ws = wb.create_sheet("Executive Summary")
     _apply_app_style(ws, hide_headers=True)
 
-    # Margin columns A and I
-    ws.column_dimensions["A"].width = 2
-    ws.column_dimensions["I"].width = 2
+    # Margin columns A and I, then fixed widths (the merged text rows do not auto-fit).
+    for col, width in (("A", 2), ("B", 38), ("C", 16), ("D", 11), ("E", 11), ("F", 11),
+                       ("G", 11), ("H", 11), ("I", 2)):
+        ws.column_dimensions[col].width = width
 
     # Aggregate KPI counts
     totals = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
@@ -224,71 +250,93 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
                 totals[f.severity] += 1
     total_findings = sum(totals.values())
 
-    # Title band
-    ws.row_dimensions[1].height = 40
+    top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    # Row 1: title
     ws.merge_cells("B1:H1")
     c = ws["B1"]
     c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
-    c.font = xs.font(bold=True, size=18, color="FFFFFF")
-    c.fill = _fill(_C_TITLE_BG)
-    c.alignment = _align(h="center")
+    c.font = _font(bold=True, size=16)
+    c.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 26
 
-    # Health banner
+    # Row 2: health line (the upper-case word stays: tests and readers look for it)
     health = result.overall_system_health
-    ws.row_dimensions[2].height = 28
     ws.merge_cells("B2:H2")
     c = ws["B2"]
-    c.value = f"Overall System Health:  {str(health).upper()}"
-    c.font = xs.font(bold=True, size=13, color="FFFFFF")
-    c.fill = _fill(_HEALTH_BG.get(health, "888888"))
-    c.alignment = _align(h="center")
+    c.value = xs.dot_label(_HEALTH_DOT.get(health, xs.MUTED), str(health).upper(), size=14,
+                           bold=True, prefix="Overall system health: ")
+    c.font = _font(bold=True, size=14)
+    c.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[2].height = 24
 
-    # Spacer
-    ws.row_dimensions[3].height = 10
-
-    # KPI tile band — rows 4-6
-    ws.row_dimensions[4].height = 18
-    ws.row_dimensions[5].height = 30
-    ws.row_dimensions[6].height = 12
-
-    _kpi_tile(ws, "B4", "C6", "TOTAL FINDINGS", total_findings, _C_TITLE_BG)
-    _kpi_tile(ws, "D4", "D6", "CRITICAL",       totals["Critical"], _SEV_BG["Critical"])
-    _kpi_tile(ws, "E4", "E6", "HIGH",           totals["High"],     _SEV_BG["High"])
-    _kpi_tile(ws, "F4", "F6", "MEDIUM",         totals["Medium"],   _SEV_BG["Medium"], fg="000000")
-    _kpi_tile(ws, "G4", "G6", "LOW",            totals["Low"],      _SEV_BG["Low"])
-
-    # Spacer
-    ws.row_dimensions[7].height = 10
-
-    # Top 5 Priority Actions header
-    r = 8
-    c = ws.cell(row=r, column=2, value="Top 5 Priority Actions")
-    c.font = xs.font(bold=True, size=13, color=_C_TITLE_BG)
-    c.border = _border_bottom(_C_TITLE_BG)
-    ws.merge_cells(f"B{r}:H{r}")
-    for col in range(2, 9):
-        ws.cell(row=r, column=col).border = _border_bottom(_C_TITLE_BG)
-
-    r += 1
-    for i, action in enumerate(result.top_5_priority_actions, 1):
-        ws.cell(row=r, column=2, value=f"{i}").font = _font(bold=True, color=_C_TITLE_BG, size=12)
-        ws.cell(row=r, column=2).alignment = _align(h="center", v="top")
-        c = ws.cell(row=r, column=3, value=action)
-        c.font = _font()
-        c.alignment = _align(wrap=True, v="top")
-        ws.merge_cells(f"C{r}:H{r}")
-        ws.row_dimensions[r].height = 15 * max(1, -(-len(str(action)) // 90))
+    r = 3
+    # System profile line, when we know anything about the system
+    profile = _profile_line(result.system_profile)
+    if profile:
+        ws.merge_cells(f"B{r}:H{r}")
+        c = ws.cell(r, 2, profile)
+        c.font = _font(size=10, color=xs.NOTE)
+        c.alignment = top_left
+        ws.row_dimensions[r].height = 15 * _text_lines(profile, 120)
         r += 1
 
-    # Spacer
-    ws.row_dimensions[r].height = 10
+    # Written summary
+    if result.executive_summary and result.executive_summary.strip():
+        r += 1
+        ws.merge_cells(f"B{r}:H{r}")
+        c = ws.cell(r, 2, result.executive_summary.strip())
+        c.font = _font()
+        c.alignment = top_left
+        ws.row_dimensions[r].height = 15 * _text_lines(result.executive_summary.strip(), 100)
+        r += 1
+
+    # Key numbers: a small grey label with its dot, a big number underneath. No fills.
+    r += 1
+    label_row, number_row = r, r + 1
+    ws.row_dimensions[label_row].height = 18
+    ws.row_dimensions[number_row].height = 30
+    tiles = [(4, "Total", None, total_findings)] + [
+        (5 + i, sev, xs.SEVERITY_COLOURS[sev], totals[sev]) for i, sev in enumerate(_SEV_ORDER)
+    ]
+    for col, label, dot_colour, number in tiles:
+        lc = ws.cell(label_row, col)
+        lc.value = (xs.dot_label(dot_colour, label, size=10, word_colour=xs.NOTE)
+                    if dot_colour else label)
+        lc.font = _font(size=10, color=xs.NOTE)
+        lc.alignment = Alignment(horizontal="right", vertical="bottom")
+        nc = ws.cell(number_row, col, number)
+        nc.font = _font(bold=True, size=20)
+        nc.alignment = Alignment(horizontal="right", vertical="center")
+    r = number_row + 2
+
+    # Top 5 priority actions
+    for col in range(2, 9):
+        ws.cell(r, col).border = Border(bottom=Side(style="medium", color=xs.HEADER_LINE))
+    c = ws.cell(r, 2, "Top 5 priority actions")
+    c.font = _font(bold=True, size=12)
+    ws.row_dimensions[r].height = 20
+    r += 1
+    for i, action in enumerate(result.top_5_priority_actions, 1):
+        text = f"{i}. {_clean_action(action)}"
+        ws.merge_cells(f"B{r}:H{r}")
+        c = ws.cell(r, 2, text)
+        c.font = _font()
+        c.alignment = top_left
+        for col in range(2, 9):
+            ws.cell(r, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+        ws.row_dimensions[r].height = 15 * _text_lines(text, 100)
+        r += 1
+
+    r += 1
+    c = ws.cell(r, 2, "Findings by section")
+    c.font = _font(bold=True, size=12)
     r += 1
 
     # Section table
     tbl_hdr_row = r
     col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
     xs.header_row(ws, tbl_hdr_row, col_headers, start_col=2, numeric_cols=(4, 5, 6, 7, 8))
-    ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
     # Worst section first: by worst severity, then most findings, then original order.
     rows = []
@@ -301,7 +349,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     rows.sort(key=lambda t: t[:3])
 
     r = tbl_hdr_row + 1
-    for idx, (_rank, _n, _orig, da, worst) in enumerate(rows):
+    for _rank, _n, _orig, da, worst in rows:
         sname = sheet_map[da.section_id]
         ref = _sheet_ref(sname)
 
@@ -311,7 +359,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
 
         hc = ws.cell(row=r, column=3, value=xs.severity_text(worst) if worst else xs.muted(xs.DASH))
         hc.font = _font()
-        hc.alignment = _align(h="left")
 
         sev_col = "B"
         data_range = f"{ref}!${sev_col}$3:${sev_col}$9999"
@@ -322,13 +369,16 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"*Medium")')
         ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"*Low")')
 
-        for col in range(4, 9):
-            ws.cell(row=r, column=col).alignment = _align(h="right")
-            ws.cell(row=r, column=col).font = _font()
-
+        for col in range(2, 9):
+            cell = ws.cell(row=r, column=col)
+            cell.border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+            cell.alignment = Alignment(horizontal="right" if col >= 4 else "left",
+                                       vertical="top", wrap_text=True)
+            if col >= 4:
+                cell.font = _font()
         r += 1
 
-    _autofit_columns(ws, min_width=8, max_width=45, skip_cols=(1, 9))
+    ws.auto_filter.ref = f"B{tbl_hdr_row}:H{max(r - 1, tbl_hdr_row)}"
 
 
 def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
