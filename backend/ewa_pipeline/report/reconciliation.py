@@ -230,6 +230,8 @@ def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.9, pos
     if top_p >= keep:
         _fill_match(row, alert, top, section_of, title_of)
         row.match_method = "Decision-1"
+        # Match score is Decision-1's p on Decision-1 rows, word overlap otherwise.
+        row.match_score = round(top_p, 3)
         row.reason = f"Decision-1 match (p={top_p:.2f}): {row.reason}"
         if runner_up and top_p - runner_up[1] <= RUNNER_UP_GAP and runner_up[1] >= possible:
             row.reason += f"; also close, please check: {_candidate(by_id[runner_up[0]], runner_up[1])}"
