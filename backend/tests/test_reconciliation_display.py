@@ -147,6 +147,19 @@ class DescribeTests(unittest.TestCase):
         for word in ("Decision", "p=", "overlap", "Report heading"):
             self.assertNotIn(word, d.explanation)
 
+    def test_same_sql_statement_row_is_medium_and_explained(self):
+        row = alert(verdict="Agree", our_rating="RED", finding_ids=["F-001"], match_method="Same SQL statement",
+                    match_score=0.97,
+                    reason='Same SQL statement as report section "14 Problematic SQL Statements" (p=0.97, '
+                           "statement 9aaf8105bdad5308ab706eea28078d28): We raised F-001 (High) 'Missing backup'; "
+                           "also close, please check: F-002 'Old kernel' (p=0.98)")
+        d = describe(row, FINDINGS)
+        self.assertEqual((d.result, d.how_sure), ("Agree", "Medium"))
+        self.assertIn("We chose it because it is about the same SQL statement that SAP's report lists for this alert.",
+                      d.explanation)
+        self.assertIn("Another finding may also relate: F-002 'Old kernel'.", d.explanation)
+        for word in ("hash", "Decision", "p=", "Same SQL statement"):
+            self.assertNotIn(word, d.explanation)
     def test_old_decision1_high_row_is_still_high(self):
         d = describe(alert(verdict="Agree", our_rating="RED", finding_ids=["F-001"], match_method="Decision-1",
                            match_score=0.95,
