@@ -162,5 +162,85 @@ def index(doc_path: str, config_path: str):
     console.print(f"\n{tree_to_summary(tree)}")
 
 
+@cli.command("alert-trial")
+@click.option("--result", "result_path", required=True, type=click.Path(exists=True), help="Path to _result.json from a previous run")
+@click.option("--out-prefix", required=True, help="Start of the output file names, e.g. output/trial")
+@click.option("--keep", default=0.8, show_default=True, type=float, help="Decision-1 probability that counts as a match")
+@click.option("--possible", default=0.5, show_default=True, type=float, help="Probability that counts as a possible match")
+@click.option("--workers", default=4, show_default=True, type=int, help="Parallel calls to Decision-1")
+@click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
+@click.option("--labels", "labels_path", default=None, type=click.Path(exists=True), help="Summary CSV with correct_finding_ids filled in; prints a scoreboard")
+@click.option("--reuse-scores", is_flag=True, help="Read <prefix>_d1_scores.json instead of calling the model")
+def alert_trial(result_path: str, out_prefix: str, keep: float, possible: float, workers: int,
+                config_path: str, labels_path: str | None, reuse_scores: bool):
+    """Offline trial: Decision-1 vs word overlap for matching SAP alerts to findings."""
+    import shutil
+    import time
+
+    from ewa_pipeline.agents import decision_client
+    from ewa_pipeline.report import alert_match_trial as trial
+
+    config = _load_env_and_config(config_path)
+    config = config.model_copy(update={"decision_enabled": True})
+
+    result = json.loads(Path(result_path).read_text(encoding="utf-8"))
+    pairs = trial.build_pairs(result)
+    if not pairs:
+        raise click.ClickException("No SAP alerts or no findings in this result file.")
+
+    prefix = Path(out_prefix)
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    scores_path = Path(f"{prefix}_d1_scores.json")
+    pairs_csv = Path(f"{prefix}_alert_pairs.csv")
+    summary_csv = Path(f"{prefix}_alert_summary.csv")
+
+    # Read the user's labels first, so nothing below can lose them.
+    labels = trial.read_labels(Path(labels_path)) if labels_path else None
+
+    if reuse_scores:
+        if not scores_path.exists():
+            raise click.ClickException(f"Cannot reuse scores: {scores_path} does not exist.")
+        saved = json.loads(scores_path.read_text(encoding="utf-8"))
+        scores = {}
+        for pair in pairs:
+            key = (pair["alert_no"], pair["finding_id"])
+            scores[key] = saved.get(f"{key[0]}|{key[1]}")
+        console.print(f"Reused scores from {scores_path} (no calls made)")
+    else:
+        def ask(question, options, context):
+            return decision_client.decide(question, options, context, config=config)
+
+        started = time.perf_counter()
+        scores = trial.score_pairs(pairs, ask, workers=workers)
+        seconds = time.perf_counter() - started
+        errors = sum(1 for v in scores.values() if v is None)
+        scores_path.write_text(
+            json.dumps({f"{a}|{f}": v for (a, f), v in scores.items()}, indent=2), encoding="utf-8"
+        )
+        console.print(
+            f"Calls made: {len(pairs)} | errors: {errors} | seconds: {seconds:.1f} | "
+            f"characters sent: {trial.request_chars(pairs):,}",
+            markup=False,
+        )
+        if errors == len(pairs):
+            raise click.ClickException("Every call failed. Check the endpoint, key and Decision-1 access.")
+
+    wo_picks = trial.pick_word_overlap(pairs)
+    d1_by_alert, d1_by_pair = trial.pick_decision(pairs, scores, keep=keep, possible=possible)
+
+    if trial.summary_has_labels(summary_csv):
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        backup = summary_csv.with_name(f"{summary_csv.stem}_labelled_backup_{stamp}{summary_csv.suffix}")
+        shutil.copy2(summary_csv, backup)
+        console.print(f"Existing labels kept in {backup}", markup=False)
+
+    trial.write_pairs_csv(pairs_csv, pairs, d1_by_pair)
+    trial.write_summary_csv(summary_csv, pairs, wo_picks, d1_by_alert, scores)
+    console.print(f"Wrote {scores_path if not reuse_scores else 'scores (reused)'}, {pairs_csv}, {summary_csv}", markup=False)
+
+    if labels is not None:
+        console.print(trial.format_scoreboard(trial.scoreboard(labels, wo_picks, d1_by_alert)), markup=False)
+
+
 if __name__ == "__main__":
     cli()

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from ewa_pipeline.agents.alert_decision import score_alerts
 from ewa_pipeline.agents.runner import run_analysis
 from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections
@@ -88,7 +89,7 @@ def run_pipeline(
         result = AnalysisResult.model_validate_json(result_path.read_text(encoding="utf-8"))
         result.system_profile = system_profile
         result.sap_summary = sap_summary
-        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile, config)
     else:
         reporter.emit(
             "analyzing_sections",
@@ -111,7 +112,7 @@ def run_pipeline(
         )
         result.system_profile = system_profile
         result.sap_summary = sap_summary
-        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile)
+        result.reconciliation = _reconcile_safely(result, sap_summary, tree, system_profile, config)
         result_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
     reporter.emit("generating_excel", "running", "Generating Excel workbook")
@@ -143,10 +144,18 @@ def run_pipeline(
     return result, cost_tracker, artifacts
 
 
-def _reconcile_safely(result, sap_summary, tree, system_profile) -> list:
+def _reconcile_safely(result, sap_summary, tree, system_profile, config: Config) -> list:
     """Compare our findings with SAP's ratings. Never breaks an analysis."""
     try:
-        return reconcile(result, sap_summary, tree, system_profile)
+        try:
+            alert_scores = score_alerts(result, sap_summary, config)  # {} unless Decision-1 is on
+        except Exception as exc:
+            logger.warning("Decision-1 alert scoring failed: %s", exc)
+            alert_scores = {}
+        return reconcile(
+            result, sap_summary, tree, system_profile,
+            alert_scores=alert_scores, keep=config.decision_keep, possible=config.decision_possible,
+        )
     except Exception as exc:
         logger.warning("SAP reconciliation failed: %s", exc)
         return []

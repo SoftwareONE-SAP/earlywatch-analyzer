@@ -175,6 +175,10 @@ All configuration is via environment variables — see `.env.example` for the fu
 | `MAX_TASK_SECTIONS` | Maximum source sections per grouped task, default 12. |
 | `MAX_TASK_CONTENT_CHARS` | Maximum complete source HTML characters per task, default 48000. |
 | `MAX_PARENT_CONTEXT_CHARS` | Maximum supplementary parent-context characters per task, default 4000; 0 disables excerpts. |
+| `DECISION_ENABLED` | Optional, off by default. `true` uses Microsoft Decision-1 to match SAP alerts to our findings in the "SAP vs Us" sheet (about 500 extra small calls per report). If a call fails, word-overlap matching is used. |
+| `DECISION_MODEL` | Decision-1 model name, default `Decision-1`. |
+| `DECISION_KEEP` / `DECISION_POSSIBLE` | Score at or above `DECISION_KEEP` (default 0.9) counts as a match; at or above `DECISION_POSSIBLE` (default 0.5) is shown as "please check". |
+| `DECISION_WORKERS` / `DECISION_BUDGET_SECONDS` | Parallel calls (default 8) and the most time spent per report (default 300 seconds). |
 
 The model clients retry failed requests up to three times by default. A YAML
 configuration can set `max_model_retries`, the timeouts, and `max_concurrency`;

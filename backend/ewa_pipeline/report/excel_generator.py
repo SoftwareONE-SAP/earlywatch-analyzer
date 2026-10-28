@@ -399,7 +399,7 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
 
     hdr = 3 + len(verdicts) + 1
     COLS = ["Source", "SAP Topic", "SAP Item", "SAP Rating", "Our Section", "Our Rating",
-            "Our Finding IDs", "Verdict", "Reason", "Match score"]
+            "Our Finding IDs", "Verdict", "Reason", "Match score", "Matched by"]
     _hdr_row(ws, hdr, COLS)
     ws.row_dimensions[hdr].height = 24
     ws.freeze_panes = f"A{hdr + 1}"
@@ -409,7 +409,7 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
         r = hdr + 1 + i
         vals = [row.source, row.sap_topic, row.sap_item, row.sap_rating, row.our_section_title,
                 row.our_rating, ", ".join(row.finding_ids), row.verdict, row.reason,
-                row.match_score if row.match_score is not None else ""]
+                row.match_score if row.match_score is not None else "", row.match_method]
         for col, val in enumerate(vals, 1):
             c = ws.cell(r, col, val)
             c.font = _font()

@@ -20,6 +20,8 @@ from ewa_pipeline.report.schemas import (
 logger = logging.getLogger(__name__)
 
 ALERT_MATCH_THRESHOLD = 0.3
+# Decision-1 runner-up is flagged when it scores within this much of the first choice.
+RUNNER_UP_GAP = 0.05
 
 _SEVERITY_ORDER = {"Low": 0, "Medium": 1, "High": 2, "Critical": 3}
 _COLOUR_BY_SEVERITY = {"Critical": "RED", "High": "RED", "Medium": "YELLOW", "Low": "GREEN"}
@@ -104,8 +106,15 @@ def reconcile(
     sap_summary: SapServiceSummary | None,
     tree: dict | None,
     profile: SystemProfile | None,
+    alert_scores: dict[int, dict[str, float]] | None = None,
+    keep: float = 0.9,
+    possible: float = 0.5,
 ) -> list[ReconciliationRow]:
-    """One row per SAP alert and per SAP check. Never raises on odd input."""
+    """One row per SAP alert and per SAP check. Never raises on odd input.
+
+    `alert_scores` is optional Decision-1 output, {alert index: {finding id: p}}.
+    Without it, alerts are matched by word overlap only.
+    """
     try:
         if sap_summary is None or not (sap_summary.alerts or sap_summary.checks):
             return []
@@ -129,7 +138,10 @@ def reconcile(
         title_of = {n.id: n.title for n in nodes}
 
         all_findings = [f for a in result.domain_analyses for f in a.findings]
-        rows = [_alert_row(a, all_findings, section_of, title_of) for a in sap_summary.alerts]
+        rows = [
+            _alert_row(a, all_findings, section_of, title_of, (alert_scores or {}).get(i), keep, possible)
+            for i, a in enumerate(sap_summary.alerts)
+        ]
         rows += [
             _check_row(c, by_title, findings_by_section, coverage, sid, db_id) for c in sap_summary.checks
         ]
@@ -167,7 +179,17 @@ def _check_row(check, by_title, findings_by_section, coverage, sid, db_id) -> Re
     return row
 
 
-def _alert_row(alert, findings, section_of, title_of) -> ReconciliationRow:
+def _fill_match(row, alert, finding, section_of, title_of) -> None:
+    section_id = section_of.get(finding.id, "")
+    row.our_section_id = section_id
+    row.our_section_title = title_of.get(section_id, "")
+    row.finding_ids = [finding.id]
+    row.our_rating = _colour(finding.severity)
+    row.reason = _raised_reason([finding])
+    row.verdict = _verdict(alert.rating, row.our_rating)
+
+
+def _word_overlap_row(alert, findings, section_of, title_of) -> ReconciliationRow:
     row = ReconciliationRow(source="Alert", sap_item=alert.text, sap_rating=alert.rating)
     alert_words = _words(alert.text)
     best, best_score = None, 0.0
@@ -180,11 +202,40 @@ def _alert_row(alert, findings, section_of, title_of) -> ReconciliationRow:
         row.verdict = "Not covered"
         row.reason = "No finding matches this alert"
         return row
-    section_id = section_of.get(best.id, "")
-    row.our_section_id = section_id
-    row.our_section_title = title_of.get(section_id, "")
-    row.finding_ids = [best.id]
-    row.our_rating = _colour(best.severity)
-    row.reason = _raised_reason([best])
-    row.verdict = _verdict(alert.rating, row.our_rating)
+    _fill_match(row, alert, best, section_of, title_of)
+    row.match_method = "Word overlap"
+    return row
+
+
+def _candidate(finding: Finding, p: float) -> str:
+    return f"{finding.id} '{finding.title}' (p={p:.2f})"
+
+
+def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.9, possible=0.5) -> ReconciliationRow:
+    """Word overlap first; then Decision-1's view, when we have its scores for this alert."""
+    row = _word_overlap_row(alert, findings, section_of, title_of)
+    by_id: dict[str, Finding] = {}
+    for finding in findings:
+        by_id.setdefault(finding.id, finding)
+    ranked = sorted(
+        ((fid, p) for fid, p in (scores or {}).items() if fid in by_id),
+        key=lambda item: -item[1],
+    )
+    if not ranked:
+        return row
+    (top_id, top_p), runner_up = ranked[0], (ranked[1] if len(ranked) > 1 else None)
+    top = by_id[top_id]
+    matched = row.match_method == "Word overlap"
+
+    if top_p >= keep:
+        _fill_match(row, alert, top, section_of, title_of)
+        row.match_method = "Decision-1"
+        row.reason = f"Decision-1 match (p={top_p:.2f}): {row.reason}"
+        if runner_up and top_p - runner_up[1] <= RUNNER_UP_GAP and runner_up[1] >= possible:
+            row.reason += f"; also close, please check: {_candidate(by_id[runner_up[0]], runner_up[1])}"
+    elif top_p >= possible:
+        check = f"please check: {_candidate(top, top_p)}"
+        row.reason = f"{row.reason}; Decision-1 possible match, {check}" if matched             else f"No confirmed match. Possible match, {check}"
+    elif matched:
+        row.reason += "; Decision-1 did not confirm this match"
     return row
