@@ -78,6 +78,7 @@ _WIDTHS = {
     "Report section": 30, "Note": 45, 
     "Reviewer note: refs": 18, "Reviewer note: score": 14, "Reviewer note: matched by": 20,
     "Reviewer note: original note": 55,
+    "Related findings": 45, "How they connect": 55, "Combined impact": 50,
 }
 
 def _set_widths(ws, header_row, ncols):
@@ -117,6 +118,7 @@ def _worst_severity(findings):
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
 _HOW_TO_READ = "How to read this workbook"
+_LINKED = "Linked Issues"
 
 
 def _build_how_to_read(wb: Workbook, tabs: set[str]):
@@ -145,8 +147,8 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
         add("No Issues Found " + xs.DASH + " report sections we checked and found clean.")
     add("Section tabs " + xs.DASH + " one tab per report section with findings: what the SAP report says, "
         "what it means and what to do about it.")
-    if "Cross-References" in tabs:
-        add("Cross-References " + xs.DASH + " findings that are connected and are best handled together.")
+    if _LINKED in tabs:
+        add(f"{_LINKED} " + xs.DASH + " findings that are connected and are best handled together.")
     add("Action Plan " + xs.DASH + " every recommended action in one list.")
 
     add("How serious is a finding?", "head")
@@ -599,30 +601,27 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
     _set_widths(ws, 1, 3)
     return True
 
-def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
-    ws = wb.create_sheet("Cross-References")
+def _build_linked_issues(wb: Workbook, xrefs: list[CrossReference], analyses: list[DomainAnalysis]):
+    """Findings that belong together, with their titles instead of bare reference numbers."""
+    ws = wb.create_sheet(_LINKED)
     _apply_app_style(ws)
 
-    COLS = ["Title", "Related Findings", "Correlation", "Combined Impact", "Recommended Action"]
+    titles = {f.id: f.title for da in analyses for f in da.findings}
+    COLS = ["Title", "Related findings", "How they connect", "Combined impact", "Recommended action"]
     _hdr_row(ws, 1, COLS)
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(5)}1"
 
     for i, xr in enumerate(xrefs):
         r = 2 + i
-        vals = [
-            xr.title,
-            ", ".join(xr.related_findings),
-            xr.correlation_description,
-            xr.combined_impact,
-            xr.recommended_action,
-        ]
+        related = "\n".join(f"{fid} {titles[fid]}" if fid in titles else fid
+                            for fid in xr.related_findings)
+        vals = [xr.title, related, xr.correlation_description, xr.combined_impact,
+                xr.recommended_action]
         for col, val in enumerate(vals, 1):
-            c = ws.cell(row=r, column=col, value=val)
-            c.font = _font()
-            c.alignment = _align(wrap=True)
+            ws.cell(row=r, column=col, value=val).font = _font()
 
-    _autofit_columns(ws, min_width=10, max_width=55)
+    xs.apply_table_style(ws, header=1, last_row=1 + len(xrefs), last_col=len(COLS))
+    _set_widths(ws, 1, len(COLS))
 
 
 def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
@@ -756,7 +755,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", "Cross-References", "Action Plan", "Document Structure",
+    used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", _LINKED, "Action Plan", "Document Structure",
                       "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found"}
     for da in result.domain_analyses:
         if not da.findings:
@@ -772,7 +771,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _build_how_to_read(wb, {
         _SAP_VS_US if result.reconciliation else "",
         "No Issues Found" if _has_healthy_sections(result) else "",
-        "Cross-References" if result.cross_references else "",
+        _LINKED if result.cross_references else "",
     })
     _build_executive_summary(wb, result, sheet_map)
     _build_all_findings(wb, result, sheet_map)
@@ -784,7 +783,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         if da.section_id in sheet_map:
             _build_section_sheet(wb, da, sheet_map[da.section_id])
     if result.cross_references:
-        _build_cross_references(wb, result.cross_references)
+        _build_linked_issues(wb, result.cross_references, result.domain_analyses)
     _build_remediation_plan(wb, result.domain_analyses)
     if tree:
         _build_document_structure(wb, tree)

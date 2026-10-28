@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report.excel_generator import generate
 from ewa_pipeline.report.schemas import (
-    AnalysisResult, DomainAnalysis, Finding, ReconciliationRow, Remediation, SectionCoverage,
+    AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow, Remediation, SectionCoverage,
     SystemProfile,
 )
 from ewa_pipeline.tracking.token_tracker import TokenUsage
@@ -379,6 +379,29 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
         self.assertEqual(ws.page_setup.fitToWidth, 1)
         self.assertEqual(ws.print_title_rows, "$1:$1")
         self.assertEqual(self.wb["Performance Indicators"].print_title_rows, "$2:$2")
+
+
+class LinkedIssuesTests(unittest.TestCase):
+    def test_linked_issues_tab_shows_titles_not_only_refs(self):
+        result = build_result()
+        result.cross_references = [CrossReference(
+            title="Old kernel and slow SQL", related_findings=["F-001", "F-999"],
+            correlation_description="Both hurt response time.", combined_impact="Slow system.",
+            recommended_action="Fix both together.")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(result, path)
+            wb = load_workbook(path)
+        self.assertNotIn("Cross-References", wb.sheetnames)
+        ws = wb["Linked Issues"]
+        self.assertEqual([c.value for c in ws[1]][:3], ["Title", "Related findings", "How they connect"])
+        self.assertEqual(ws["B2"].value, "F-001 Kernel release out of maintenance\nF-999")
+        self.assertEqual(ws.sheet_view.zoomScale, 100)
+        how = " ".join(str(c.value) for row in wb["How to read this workbook"].iter_rows() for c in row)
+        self.assertIn("Linked Issues", how)
+        self.assertNotIn("Cross-References", how)
+        names = wb.sheetnames
+        self.assertLess(names.index("Linked Issues"), names.index("Action Plan"))
 
 
 class ExecutiveSummaryStyleTests(unittest.TestCase):
