@@ -191,6 +191,7 @@ def reconcile(
     keep: float = 0.85,
     possible: float = 0.5,
     heading_check: bool = True,
+    statement_check: bool = True,
 ) -> list[ReconciliationRow]:
     """One row per SAP alert and per SAP check. Never raises on odd input.
 
@@ -221,6 +222,7 @@ def reconcile(
 
         all_findings = [f for a in result.domain_analyses for f in a.findings]
         heading_path = _heading_paths(tree) if heading_check else {}
+        section_texts = _section_texts(nodes) if statement_check else []
         rows = []
         for i, a in enumerate(sap_summary.alerts):
             scores = (alert_scores or {}).get(i)
@@ -232,6 +234,12 @@ def reconcile(
                     )
                 except Exception as exc:  # the heading check is an extra; keep the Decision-1 row
                     logger.warning("Heading check failed for alert %s: %s", i, exc)
+            if statement_check:
+                try:
+                    home = _home_section(a.text, section_texts)
+                    row = _statement_rerank(row, a, all_findings, scores, section_of, title_of, home, possible)
+                except Exception as exc:  # the statement check is an extra too; keep the row as it is
+                    logger.warning("Statement check failed for alert %s: %s", i, exc)
             rows.append(row)
         rows += [
             _check_row(c, by_title, findings_by_section, coverage, sid, db_id) for c in sap_summary.checks
@@ -347,6 +355,43 @@ def _heading_rerank(
     )
     return row
 
+
+def _statement_rerank(row, alert, findings, scores, section_of, title_of, home, possible) -> ReconciliationRow:
+    """Switch to a finding about the SQL statement that SAP's own section for this alert lists.
+
+    `home` is the report section found for the alert. Only Decision-1 and Report heading rows
+    change, and only when the current pick names none of the section's statement IDs while a
+    finding with p >= `possible` does. Nothing happens when there is no such finding.
+    """
+    if row.match_method not in ("Decision-1", "Report heading") or home is None or not row.finding_ids:
+        return row
+    home_ids = set(_STATEMENT_ID_RE.findall(home.content or ""))
+    if not home_ids:
+        return row
+    by_id: dict[str, Finding] = {}
+    for finding in findings:
+        by_id.setdefault(finding.id, finding)
+    old = by_id.get(row.finding_ids[0])
+    if old is None or _statement_ids(old) & home_ids:
+        return row
+    best = None  # (p, finding, shared ids)
+    for fid, finding in by_id.items():
+        shared = _statement_ids(finding) & home_ids
+        p = (scores or {}).get(fid, 0.0)
+        if shared and p >= possible and (best is None or p > best[0]):
+            best = (p, finding, shared)
+    if best is None:
+        return row
+    best_p, new, shared = best
+    old_p = (scores or {}).get(old.id, 0.0)
+    _fill_match(row, alert, new, section_of, title_of)
+    row.match_method = "Same SQL statement"
+    row.match_score = round(best_p, 3)
+    row.reason = (
+        f'Same SQL statement as report section "{home.title}" (p={best_p:.2f}, statement {sorted(shared)[0]}): '
+        f"{row.reason}; also close, please check: {_candidate(old, old_p)}"
+    )
+    return row
 
 def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.85, possible=0.5) -> ReconciliationRow:
     """Word overlap first; then Decision-1's view, when we have its scores for this alert."""

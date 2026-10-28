@@ -413,6 +413,77 @@ class HomeSectionTests(unittest.TestCase):
         texts = self.sections(node("0115", "A", text="<p>SQL statement causes unnecessary load.</p>"))
         self.assertIsNone(_home_section(long_alert, texts))  # 4 shared words, under half of the alert's
 
+class StatementCheckTests(unittest.TestCase):
+    """The statement check re-ranks Decision-1's own scores; nothing here touches the network."""
+
+    X = "9aaf8105bdad5308ab706eea28078d28"
+    Y = "d6fd1e2f3a4b5c6d7e8f9a0b1c2d3e4f"
+    ALERT = "At least one SQL statement causes unnecessary high load on the system"
+
+    def tree(self, home_text=None):
+        if home_text is None:
+            home_text = f"<p>One SQL statement causes unnecessary high load.</p><table><tr><td>{self.X}</td></tr></table>"
+        return {"structure": [
+            node("0115", "14 Problematic SQL Statements", text=home_text),
+            node("0120", "15 Expensive Statements"),
+            node("0130", "16 Other Statements"),
+        ]}
+
+    def setUp(self):
+        self.a = finding("A-1", "High", "Statement d6fd is slow", evidence=f"statement {self.Y}")
+        self.b = finding("B-1", "Medium", "Statement 9aaf is slow", evidence=f"statement {self.X}")
+        self.c = finding("C-1", "Low", "SQL section overview", evidence=f"see {self.X}")
+        self.result = make_result(
+            [analysis("0120", self.a), analysis("0130", self.b), analysis("0115", self.c)],
+            [cover("0120"), cover("0130"), cover("0115")],
+        )
+
+    def run_alert(self, scores, text=None, tree=None, **kwargs):
+        summary = SapServiceSummary(alerts=[SapAlert(rating="RED", text=text or self.ALERT)])
+        tree = tree or self.tree()
+        return reconcile(self.result, summary, tree, PROFILE, alert_scores={0: scores}, **kwargs)[0]
+
+    def test_switches_to_the_finding_with_the_same_statement(self):
+        row = self.run_alert({"A-1": 0.98, "B-1": 0.97, "C-1": 0.01})
+        self.assertEqual(row.finding_ids, ["B-1"])
+        self.assertEqual((row.match_method, row.match_score), ("Same SQL statement", 0.97))
+        self.assertEqual(row.our_section_id, "0130")
+        self.assertIn("please check: A-1 'Statement d6fd is slow' (p=0.98)", row.reason)
+        self.assertIn(self.X, row.reason)
+
+    def test_pick_that_already_has_the_statement_is_kept(self):
+        row = self.run_alert({"B-1": 0.98, "A-1": 0.50})
+        self.assertEqual((row.finding_ids, row.match_method), (["B-1"], "Decision-1"))
+
+    def test_only_carrier_below_possible_does_not_switch(self):
+        row = self.run_alert({"A-1": 0.98, "B-1": 0.40, "C-1": 0.01})
+        self.assertEqual((row.finding_ids, row.match_method), (["A-1"], "Decision-1"))
+
+    def test_home_section_without_a_statement_id_does_not_switch(self):
+        tree = self.tree("<p>One SQL statement causes unnecessary high load.</p>")
+        row = self.run_alert({"A-1": 0.98, "B-1": 0.97}, tree=tree)
+        self.assertEqual((row.finding_ids, row.match_method), (["A-1"], "Decision-1"))
+
+    def test_word_overlap_row_is_untouched(self):
+        self.a.title = "SQL statement causes unnecessary high load on the system"
+        row = self.run_alert({})
+        self.assertEqual((row.finding_ids, row.match_method), (["A-1"], "Word overlap"))
+
+    def test_switch_off_gives_identical_rows(self):
+        scores = {"A-1": 0.98, "B-1": 0.97}
+        off = self.run_alert(scores, statement_check=False)
+        self.assertEqual((off.finding_ids, off.match_method), (["A-1"], "Decision-1"))
+        self.assertEqual(off, self.run_alert(scores, tree=self.tree("<p>nothing useful</p>")))
+
+    def test_missing_text_and_odd_input_do_not_raise(self):
+        scores = {"A-1": 0.98, "B-1": 0.97}
+        tree = {"structure": [node("0115", "14 Problematic SQL Statements")]}
+        row = self.run_alert(scores, tree=tree)
+        self.assertEqual(row.match_method, "Decision-1")
+        self.assertEqual(self.run_alert(scores, text=" ").match_method, "Decision-1")
+        self.assertEqual(reconcile(self.result, SapServiceSummary(alerts=[SapAlert(rating="RED", text="x")]), None,
+                                   None, alert_scores={0: scores})[0].match_method, "Decision-1")
+
 class EdgeCaseTests(unittest.TestCase):
     def test_none_or_empty_summary_gives_no_rows(self):
         result = make_result([], [])
