@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report import excel_style as xs
@@ -21,13 +21,10 @@ from ewa_pipeline.tracking.token_tracker import TokenUsage
 _SZ     = 11          # body size
 
 _C_LINK     = xs.LINK
-_C_BORDER   = "BFBFBF"
 
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
 
 # SAP's own traffic-light ratings, and the "SAP vs Us" verdict colours.
-_RATING_BG = {"RED": "C00000", "YELLOW": "FFC000", "GREEN": "548235"}
-_RATING_FG = {"RED": "FFFFFF", "YELLOW": "000000", "GREEN": "FFFFFF"}
 _RATING_ORDER = {"RED": 0, "YELLOW": 1, "GREEN": 2}
 
 _NUM = '#,##0'
@@ -37,14 +34,8 @@ _NUM = '#,##0'
 def _font(bold=False, size=xs.BODY_SIZE, color=xs.TEXT, italic=False):
     return xs.font(bold=bold, size=size, color=color, italic=italic)
 
-def _fill(hex_color):
-    return PatternFill("solid", fgColor=hex_color)
-
 def _align(h="left", v="center", wrap=False):
     return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
-
-def _border_bottom(color=_C_BORDER):
-    return Border(bottom=Side(style="thin", color=color))
 
 def _apply_app_style(ws, *, hide_headers=False):
     """Plain view: 100% zoom, no gridlines. Freeze and print setup happen at the end of generate()."""
@@ -84,7 +75,7 @@ _WIDTHS = {
     "Reviewer note: why check first": 50, "Reviewer note: search query": 50,
     "SAP list": 11, "SAP topic": 24, "What SAP says": 40, "SAP rating": 14,
     "SoftwareONE rating": 18, "Our finding": 36, "Result": 26, "Explanation": 55,
-    "Report section": 30,
+    "Report section": 30, "Note": 45, 
     "Reviewer note: refs": 18, "Reviewer note: score": 14, "Reviewer note: matched by": 20,
     "Reviewer note: original note": 55,
 }
@@ -595,24 +586,18 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
     _apply_app_style(ws)
     _hdr_row(ws, 1, ["Section", "SAP rating", "Note"])
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = "A1:C1"
 
     for i, cov in enumerate(healthy):
         r = 2 + i
         rating = sap_rating.get(cov.section_id, "")
-        note = "SAP disagrees" if rating in ("RED", "YELLOW") else ""
-        ws.cell(r, 1, f"{cov.section_id} {cov.section_title}".strip()).font = _font()
-        ws.cell(r, 2, rating).font = _font()
-        ws.cell(r, 3, note).font = _font(bold=bool(note))
-        if rating in _RATING_BG:
-            c = ws.cell(r, 2)
-            c.fill = _fill(_RATING_BG[rating])
-            c.font = _font(bold=True, color=_RATING_FG[rating])
-            c.alignment = _align(h="center")
+        flagged = rating in ("RED", "YELLOW")
+        ws.cell(r, 1, cov.section_title.strip() or cov.section_id).font = _font()
+        ws.cell(r, 2, xs.rating_text(rating)).font = _font()
+        ws.cell(r, 3, f"SAP flagged this {xs.DASH} please review" if flagged else None).font = _font(bold=flagged)
 
-    _autofit_columns(ws, min_width=8, max_width=55)
+    xs.apply_table_style(ws, header=1, last_row=1 + len(healthy), last_col=3)
+    _set_widths(ws, 1, 3)
     return True
-
 
 def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
     ws = wb.create_sheet("Cross-References")

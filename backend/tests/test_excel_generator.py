@@ -304,10 +304,14 @@ class SapVsUsTests(unittest.TestCase):
         wb = self._generate(result)
         ws = wb["No Issues Found"]
         self.assertEqual(ws.max_row, 3)  # header + 2 healthy sections
+        flag = "SAP flagged this — please review"
         rows = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value) for r in (2, 3)}
-        self.assertFalse(any(rows["3 Hardware"]))
-        self.assertEqual(rows["4 Database"], ("RED", "SAP disagrees"))
-        self.assertEqual(sum(1 for _, n in rows.values() if n == "SAP disagrees"), 1)
+        self.assertEqual(rows["Hardware"], ("—", None))  # no SAP rating: muted dash, no note
+        self.assertEqual(rows["Database"], ("● Red", flag))
+        self.assertEqual(sum(1 for _, n in rows.values() if n == flag), 1)
+        for r in (2, 3):
+            self.assertIn(ws.cell(r, 2).fill.fill_type, (None, ""))
+        self.assertNotIn("disagrees", " ".join(str(c.value) for row in ws.iter_rows() for c in row))
 
     def test_both_sheets_ordered_when_both_present(self):
         result = build_result()
