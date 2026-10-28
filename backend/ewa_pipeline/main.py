@@ -252,7 +252,7 @@ def alert_trial(result_path: str, out_prefix: str, keep: float, possible: float,
 @click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
 def alert_replay(result_path: str, tree_path: str, scores_path: str, labels_path: str,
                  keep: float | None, possible: float | None, config_path: str):
-    """Offline check: replay saved Decision-1 scores with and without the report-heading check.
+    """Offline check: replay saved Decision-1 scores with and without the report-heading and same-statement checks.
 
     Makes no AI calls and writes no files.
     """
