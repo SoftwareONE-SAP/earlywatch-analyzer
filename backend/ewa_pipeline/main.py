@@ -242,5 +242,37 @@ def alert_trial(result_path: str, out_prefix: str, keep: float, possible: float,
         console.print(trial.format_scoreboard(trial.scoreboard(labels, wo_picks, d1_by_alert)), markup=False)
 
 
+@cli.command("alert-replay")
+@click.option("--result", "result_path", required=True, type=click.Path(exists=True), help="Path to _result.json from a previous run")
+@click.option("--tree", "tree_path", required=True, type=click.Path(exists=True), help="Path to the report's compact_tree.json")
+@click.option("--scores", "scores_path", required=True, type=click.Path(exists=True), help="Saved <prefix>_d1_scores.json from alert-trial")
+@click.option("--labels", "labels_path", required=True, type=click.Path(exists=True), help="Summary CSV with correct_finding_ids filled in")
+@click.option("--keep", default=None, type=float, help="Match cut-off (default: DECISION_KEEP from config)")
+@click.option("--possible", default=None, type=float, help="Possible-match cut-off (default: DECISION_POSSIBLE from config)")
+@click.option("--config", "config_path", default="config.yaml", show_default=True, help="Config YAML path")
+def alert_replay(result_path: str, tree_path: str, scores_path: str, labels_path: str,
+                 keep: float | None, possible: float | None, config_path: str):
+    """Offline check: replay saved Decision-1 scores with and without the report-heading check.
+
+    Makes no AI calls and writes no files.
+    """
+    from ewa_pipeline.report import alert_match_trial as trial
+
+    if keep is None or possible is None:
+        config = _load_env_and_config(config_path)
+        keep = config.decision_keep if keep is None else keep
+        possible = config.decision_possible if possible is None else possible
+
+    def load(path: str) -> dict:
+        return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+    board = trial.replay_board(
+        load(result_path), load(tree_path), load(scores_path),
+        trial.read_labels(Path(labels_path)), keep, possible,
+    )
+    console.print(f"Replay at keep={keep}, possible={possible}", markup=False)
+    console.print(trial.format_replay(board), markup=False)
+
+
 if __name__ == "__main__":
     cli()

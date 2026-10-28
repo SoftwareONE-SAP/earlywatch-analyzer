@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ewa_pipeline.agents.alert_decision import CRITERIA, EVIDENCE_LIMIT, QUESTION, decision_state  # noqa: F401
-from ewa_pipeline.report.reconciliation import ALERT_MATCH_THRESHOLD, _alert_score, _words
+from ewa_pipeline.report.reconciliation import ALERT_MATCH_THRESHOLD, _alert_score, _words, reconcile
 from ewa_pipeline.report.schemas import AnalysisResult, SapServiceSummary
 
 PAIR_COLUMNS = [
@@ -260,4 +260,62 @@ def format_scoreboard(board: dict) -> str:
         c = board[key]
         lines.append(f"{name:<14}{c['right']:>7}{c['wrong']:>7}{c['missed']:>8}{c['correct_none']:>14}")
     lines.append(f"Decision-1 wrong extra matches: {board['decision']['wrong_extras']}")
+    return "\n".join(lines)
+
+
+def replay_board(result: dict, tree: dict, saved: dict, labels: dict[int, set[str]],
+                 keep: float, possible: float) -> dict:
+    """Re-run the live matching rules on saved Decision-1 scores, with and without the heading check.
+
+    Makes no AI calls. `saved` is the _d1_scores.json content: {"<alert no>|<finding id>": p}.
+    Alert numbers start at 1. Returns {"before", "after", "changed"} where before/after count
+    right / wrong / missed / correct_none for labelled alerts, and changed lists
+    (alert_no, old finding id, new finding id) for every alert the heading check moved.
+    """
+    analysis = AnalysisResult.model_validate(result)
+    summary = SapServiceSummary.model_validate(result.get("sap_summary") or {})
+    alert_scores: dict[int, dict[str, float]] = {}
+    for key, p in saved.items():
+        alert_no, _, finding_id = key.partition("|")
+        if p is not None and alert_no.isdigit():
+            alert_scores.setdefault(int(alert_no) - 1, {})[finding_id] = float(p)
+
+    def first_ids(heading_check: bool) -> dict[int, str | None]:
+        rows = reconcile(
+            analysis, summary, tree, analysis.system_profile, alert_scores=alert_scores,
+            keep=keep, possible=possible, heading_check=heading_check,
+        )
+        alert_rows = [r for r in rows if r.source == "Alert"]
+        return {i: (r.finding_ids[0] if r.finding_ids else None) for i, r in enumerate(alert_rows, start=1)}
+
+    def tally(picks: dict[int, str | None]) -> dict:
+        counts = {"right": 0, "wrong": 0, "missed": 0, "correct_none": 0}
+        for alert_no, correct in labels.items():
+            if alert_no not in picks:
+                continue
+            pick = picks[alert_no]
+            if pick is None:
+                counts["correct_none" if not correct else "missed"] += 1
+            else:
+                counts["right" if pick in correct else "wrong"] += 1
+        return counts
+
+    before, after = first_ids(False), first_ids(True)
+    return {
+        "before": tally(before),
+        "after": tally(after),
+        "changed": [(n, before[n], after[n]) for n in sorted(before) if before[n] != after[n]],
+    }
+
+
+def format_replay(board: dict) -> str:
+    lines = [f"{'':<8}{'Right':>7}{'Wrong':>7}{'Missed':>8}{'Correct-none':>14}"]
+    for name in ("before", "after"):
+        c = board[name]
+        lines.append(f"{name:<8}{c['right']:>7}{c['wrong']:>7}{c['missed']:>8}{c['correct_none']:>14}")
+    if board["changed"]:
+        lines.append("Changed alerts (alert no: old -> new):")
+        lines += [f"  {n}: {old} -> {new}" for n, old, new in board["changed"]]
+    else:
+        lines.append("Changed alerts: none")
     return "\n".join(lines)
