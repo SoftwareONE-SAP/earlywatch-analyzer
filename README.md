@@ -180,6 +180,12 @@ All configuration is via environment variables — see `.env.example` for the fu
 | `DECISION_KEEP` / `DECISION_POSSIBLE` | Score at or above `DECISION_KEEP` (default 0.85) counts as a match; at or above `DECISION_POSSIBLE` (default 0.5) is shown as "please check". |
 | `DECISION_WORKERS` / `DECISION_BUDGET_SECONDS` | Parallel calls (default 8) and the most time spent per report (default 300 seconds). |
 
+**Heading check.** Decision-1 matches on topic, so it can pick a sibling finding. When it picks a finding, a plain-Python check re-ranks its own scores: if another candidate (score at or above `DECISION_POSSIBLE`) sits under a report heading, its own or a parent one, that repeats SAP's alert wording, and the first pick does not, the report uses that candidate instead. The row is marked "Medium" confidence and names the first pick as "also close, please check". It makes no extra AI calls. To compare results with and without it on saved scores, without any AI calls or output files, run this from `backend/`:
+
+```
+python -m ewa_pipeline alert-replay --result output/X_result.json --tree output/X.compact_tree.json --scores output/X_d1_scores.json --labels output/X_alert_summary.csv --keep 0.85
+```
+
 The model clients retry failed requests up to three times by default. A YAML
 configuration can set `max_model_retries`, the timeouts, and `max_concurrency`;
 explicit YAML runtime values take precedence over environment values. Reasoning
