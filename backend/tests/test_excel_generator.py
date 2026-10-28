@@ -95,8 +95,9 @@ class ExcelGeneratorTests(unittest.TestCase):
 
     def test_all_findings_follows_executive_summary(self):
         names = self.wb.sheetnames
-        self.assertEqual(names[0], "Executive Summary")
-        self.assertEqual(names[1], "All Findings")
+        self.assertEqual(names[0], "How to read this workbook")
+        self.assertEqual(names[1], "Executive Summary")
+        self.assertEqual(names[2], "All Findings")
         for expected in ("Software Configuration", "Performance Indicators", "Action Plan", "Token Usage"):
             self.assertIn(expected, names)
 
@@ -196,7 +197,29 @@ class ExcelGeneratorTests(unittest.TestCase):
         generate(result, path)
         names = load_workbook(path).sheetnames
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(names[1], "All Findings")
+        self.assertEqual(names[2], "All Findings")
+
+    def test_how_to_read_is_first_and_active(self):
+        self.assertEqual(self.wb.active.title, "How to read this workbook")
+        selected = [ws.title for ws in self.wb.worksheets if ws.sheet_view.tabSelected]
+        self.assertEqual(selected, ["How to read this workbook"])
+        ws = self.wb["How to read this workbook"]
+        self.assertEqual(ws.column_dimensions["A"].width, 100)
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+        for expected in ("● Critical", "● Red", "●●● High", "●○○ Low", "Reviewer note"):
+            self.assertIn(expected, text)
+
+    def test_technical_tabs_are_hidden_and_the_rest_visible(self):
+        self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
+        for name in ("How to read this workbook", "Executive Summary", "All Findings",
+                     "Software Configuration", "Action Plan"):
+            self.assertEqual(self.wb[name].sheet_state, "visible", name)
+
+    def test_tab_order_front_tabs_sections_then_action_plan(self):
+        names = self.wb.sheetnames
+        self.assertEqual(names[:3], ["How to read this workbook", "Executive Summary", "All Findings"])
+        self.assertLess(names.index("Performance Indicators"), names.index("Action Plan"))
+        self.assertLess(names.index("Action Plan"), names.index("Token Usage"))
 
 
 def _row(source, verdict, **kw) -> ReconciliationRow:
@@ -222,7 +245,8 @@ class SapVsUsTests(unittest.TestCase):
             _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
         ]
         wb = self._generate(result)
-        self.assertEqual(wb.sheetnames[:3], ["Executive Summary", "All Findings", "SAP vs SoftwareONE"])
+        self.assertEqual(wb.sheetnames[:4],
+                         ["How to read this workbook", "Executive Summary", "All Findings", "SAP vs SoftwareONE"])
         ws = wb["SAP vs SoftwareONE"]
 
         counts = {ws.cell(r, 1).value: (ws.cell(r, 4).value, ws.cell(r, 5).value, ws.cell(r, 6).value)
@@ -289,7 +313,7 @@ class SapVsUsTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[1:4], ["All Findings", "SAP vs SoftwareONE", "No Issues Found"])
+        self.assertEqual(names[2:5], ["All Findings", "SAP vs SoftwareONE", "No Issues Found"])
 
     def test_old_payload_has_neither_sheet(self):
         wb = self._generate(build_result())
@@ -334,7 +358,8 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                         self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
 
     def test_only_front_tabs_have_navy_tab_colour(self):
-        front = {"Executive Summary", "All Findings", "SAP vs SoftwareONE", "No Issues Found"}
+        front = {"How to read this workbook", "Executive Summary", "All Findings",
+                 "SAP vs SoftwareONE", "No Issues Found"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
             if ws.title in front:

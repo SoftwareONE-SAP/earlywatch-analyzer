@@ -136,6 +136,78 @@ def _worst_severity(findings):
 
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
+_HOW_TO_READ = "How to read this workbook"
+
+
+def _build_how_to_read(wb: Workbook, tabs: set[str]):
+    """First tab: what each tab is for and what the dots mean. One wide wrapped column."""
+    ws = wb.create_sheet(_HOW_TO_READ)
+    _apply_app_style(ws)
+    ws.column_dimensions["A"].width = 100
+
+    lines: list = []  # (text or rich text, kind) with kind in title / note / head / body
+
+    def add(value, kind="body"):
+        lines.append((value, kind))
+
+    add(_HOW_TO_READ, "title")
+    add("A plain-English review of your SAP EarlyWatch Alert report, prepared by SoftwareONE. "
+        "Read this page first.", "note")
+    add("What each tab shows", "head")
+    add("Executive Summary " + xs.DASH + " the overall health, the most urgent actions and the number of "
+        "findings in each report section.")
+    add("All Findings " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
+        "header row to filter or sort.")
+    if _SAP_VS_US in tabs:
+        add(f"{_SAP_VS_US} " + xs.DASH + " SAP's own ratings next to ours, so you can see where we agree "
+            "and where a second look is worthwhile.")
+    if "No Issues Found" in tabs:
+        add("No Issues Found " + xs.DASH + " report sections we checked and found clean.")
+    add("Section tabs " + xs.DASH + " one tab per report section with findings: what the SAP report says, "
+        "what it means and what to do about it.")
+    if "Cross-References" in tabs:
+        add("Cross-References " + xs.DASH + " findings that are connected and are best handled together.")
+    add("Action Plan " + xs.DASH + " every recommended action in one list.")
+
+    add("How serious is a finding?", "head")
+    add(xs.legend_line(xs.severity_text("Critical"), "needs attention straight away."))
+    add(xs.legend_line(xs.severity_text("High"), "should be fixed soon."))
+    add(xs.legend_line(xs.severity_text("Medium"), "plan a fix."))
+    add(xs.legend_line(xs.severity_text("Low"), "worth knowing; low urgency."))
+
+    add("SAP's own traffic lights", "head")
+    add(xs.legend_line(xs.rating_text("RED"), "SAP flags this as a problem."))
+    add(xs.legend_line(xs.rating_text("YELLOW"), "SAP flags this as a warning."))
+    add(xs.legend_line(xs.rating_text("GREEN"), "SAP sees no problem."))
+
+    add("How sure are we?", "head")
+    add(xs.legend_line(xs.sure_dots("High"), "the evidence is clear."))
+    add(xs.legend_line(xs.sure_dots("Medium"), "likely, but worth confirming."))
+    add(xs.legend_line(xs.sure_dots("Low"), "a rough match; please check by hand."))
+
+    add("Good to know", "head")
+    add("Columns called \"Reviewer note\" are folded away. Click the small + above the column letters to "
+        "open them.")
+    add("Some technical tabs are hidden. To see them in Excel, right-click any tab and choose Unhide.")
+    add("\"Check latest SAP guidance first?\" says Yes when the advice depends on current SAP Notes or "
+        "release information that you should look up before acting.")
+
+    for r, (value, kind) in enumerate(lines, 1):
+        c = ws.cell(r, 1, value)
+        if kind == "title":
+            c.font = _font(bold=True, size=16)
+        elif kind == "note":
+            c.font = _font(size=10, color=xs.NOTE)
+        elif kind == "head":
+            c.font = _font(bold=True)
+        else:
+            c.font = _font()
+        c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        if kind == "head":
+            ws.row_dimensions[r].height = 30  # room above the heading
+            c.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+
 def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     ws = wb.create_sheet("Executive Summary")
     _apply_app_style(ws, hide_headers=True)
@@ -443,11 +515,20 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     _collapse_group(ws, 11, 14)
 
 
+def _healthy_sections(result: AnalysisResult) -> list:
+    """Coverage entries we analysed and found clean."""
+    with_findings = {da.section_id for da in result.domain_analyses if da.findings}
+    return [c for c in result.coverage
+            if c.status == "analyzed" and c.section_id not in with_findings]
+
+
+def _has_healthy_sections(result: AnalysisResult) -> bool:
+    return bool(_healthy_sections(result))
+
+
 def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
     """Sections we analysed and found clean. Returns False (no sheet) when none qualify."""
-    with_findings = {da.section_id for da in result.domain_analyses if da.findings}
-    healthy = [c for c in result.coverage
-               if c.status == "analyzed" and c.section_id not in with_findings]
+    healthy = _healthy_sections(result)
     if not healthy:
         return False
 
@@ -607,9 +688,6 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
         c = ws.cell(tr, col, f"=SUM({letter}2:{letter}{tr-1})")
         c.number_format = _NUM
         c.font = _font(bold=True)
-    for col in range(1, 8):
-        ws.cell(tr, col).fill = _fill("BDD7EE")
-
     ws.cell(tr + 2, 1,
         "Phase 0 tokens are not tracked — PageIndex runs via LiteLLM independently."
     ).font = _font(italic=True, color="888888")
@@ -622,10 +700,14 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
 # The five front tabs get the navy tab colour; every other tab has none.
 _FRONT_TABS = set(xs.FRONT_TABS)
 
+# Technical tabs for reviewers: kept in the file, hidden from view.
+_HIDDEN_TABS = {"Document Structure", "Token Usage", "Analysis Tasks", "Source Coverage"}
+
 def _finish_sheets(wb: Workbook) -> None:
     """Tab colour policy and print setup. Freeze panes were set by each builder."""
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = xs.NAVY if ws.title in _FRONT_TABS else None
+        ws.sheet_state = "hidden" if ws.title in _HIDDEN_TABS else "visible"
         freeze = ws.freeze_panes
         header_row = int("".join(ch for ch in freeze if ch.isdigit())) - 1 if freeze else None
         xs.apply_print_setup(ws, repeat_row=header_row or None)
@@ -639,7 +721,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Action Plan", "Document Structure",
+    used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", "Cross-References", "Action Plan", "Document Structure",
                       "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found"}
     for da in result.domain_analyses:
         if not da.findings:
@@ -652,6 +734,11 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         sheet_map[da.section_id] = name
         used.add(name)
 
+    _build_how_to_read(wb, {
+        _SAP_VS_US if result.reconciliation else "",
+        "No Issues Found" if _has_healthy_sections(result) else "",
+        "Cross-References" if result.cross_references else "",
+    })
     _build_executive_summary(wb, result, sheet_map)
     _build_all_findings(wb, result, sheet_map)
     if result.reconciliation:
@@ -698,8 +785,10 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     _finish_sheets(wb)
 
-    # Open on the dashboard
+    # Open on "How to read this workbook" (the first tab)
     wb.active = 0
+    for i, ws in enumerate(wb.worksheets):
+        ws.sheet_view.tabSelected = (i == 0)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -169,6 +169,13 @@ def sure_dots(level):
     return CellRichText(*blocks)
 
 
+def legend_line(label, note):
+    """A dots-and-word label (from rating_text etc.) followed by a plain explanation, as one cell value."""
+    if not RICH or not isinstance(label, CellRichText):
+        return f"{label} {DASH} {note}"
+    return CellRichText(*label, TextBlock(_inline(TEXT), f" {DASH} {note}"))
+
+
 def muted(text):
     """Grey text for "nothing here" values. Rich text when available."""
     if not RICH:
