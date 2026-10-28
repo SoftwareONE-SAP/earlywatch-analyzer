@@ -145,6 +145,7 @@ def reconcile(
     alert_scores: dict[int, dict[str, float]] | None = None,
     keep: float = 0.85,
     possible: float = 0.5,
+    heading_check: bool = True,
 ) -> list[ReconciliationRow]:
     """One row per SAP alert and per SAP check. Never raises on odd input.
 
@@ -174,10 +175,19 @@ def reconcile(
         title_of = {n.id: n.title for n in nodes}
 
         all_findings = [f for a in result.domain_analyses for f in a.findings]
-        rows = [
-            _alert_row(a, all_findings, section_of, title_of, (alert_scores or {}).get(i), keep, possible)
-            for i, a in enumerate(sap_summary.alerts)
-        ]
+        heading_path = _heading_paths(tree) if heading_check else {}
+        rows = []
+        for i, a in enumerate(sap_summary.alerts):
+            scores = (alert_scores or {}).get(i)
+            row = _alert_row(a, all_findings, section_of, title_of, scores, keep, possible)
+            if heading_check:
+                try:
+                    row = _heading_rerank(
+                        row, a, all_findings, scores, section_of, title_of, heading_path, sid, db_id, keep, possible
+                    )
+                except Exception as exc:  # the heading check is an extra; keep the Decision-1 row
+                    logger.warning("Heading check failed for alert %s: %s", i, exc)
+            rows.append(row)
         rows += [
             _check_row(c, by_title, findings_by_section, coverage, sid, db_id) for c in sap_summary.checks
         ]
@@ -245,6 +255,52 @@ def _word_overlap_row(alert, findings, section_of, title_of) -> ReconciliationRo
 
 def _candidate(finding: Finding, p: float) -> str:
     return f"{finding.id} '{finding.title}' (p={p:.2f})"
+
+
+def _heading_rerank(
+    row, alert, findings, scores, section_of, title_of, heading_path, sid, db_id, keep, possible
+) -> ReconciliationRow:
+    """Switch a Decision-1 pick to a strong candidate under a report heading that repeats the alert's wording.
+
+    Only Decision-1 rows change, and only when the new finding's heading matches the alert
+    better than the top pick's headings do. No extra AI calls: it re-ranks the scores we have.
+    """
+    if row.match_method != "Decision-1":
+        return row
+    by_id: dict[str, Finding] = {}
+    for finding in findings:
+        by_id.setdefault(finding.id, finding)
+    ranked = sorted(
+        ((fid, p) for fid, p in (scores or {}).items() if fid in by_id),
+        key=lambda item: -item[1],
+    )
+    if len(ranked) < 2:
+        return row
+    alert_words = _words(alert.text)
+
+    def heading_of(fid: str) -> tuple[int, str]:
+        return _heading_score(alert_words, heading_path.get(section_of.get(fid, ""), []), sid, db_id)
+
+    top_id, top_p = ranked[0]
+    top_count = heading_of(top_id)[0]
+    best = None  # (count, p, fid, title)
+    for fid, p in ranked[1:]:
+        if p < possible:
+            continue
+        count, title = heading_of(fid)
+        if best is None or (count, p) > (best[0], best[1]):
+            best = (count, p, fid, title)
+    if best is None or best[0] <= top_count:
+        return row
+    _, best_p, best_id, title = best
+    _fill_match(row, alert, by_id[best_id], section_of, title_of)
+    row.match_method = "Report heading"
+    row.match_score = round(best_p, 3)
+    row.reason = (
+        f'Report heading match (p={best_p:.2f}, heading "{title}"): {row.reason}'
+        f"; also close, please check: {_candidate(by_id[top_id], top_p)}"
+    )
+    return row
 
 
 def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.85, possible=0.5) -> ReconciliationRow:
