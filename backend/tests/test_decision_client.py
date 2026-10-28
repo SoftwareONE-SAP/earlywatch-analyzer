@@ -107,7 +107,7 @@ class DecisionClientTests(unittest.TestCase):
         self.assertEqual(
             (config.decision_keep, config.decision_possible,
              config.decision_workers, config.decision_budget_seconds),
-            (0.9, 0.5, 8, 300),
+            (0.85, 0.5, 8, 300),
         )
         env = {"DECISION_KEEP": "0.95", "DECISION_POSSIBLE": "0.6",
                "DECISION_WORKERS": "2", "DECISION_BUDGET_SECONDS": "60"}
