@@ -195,6 +195,7 @@ class DecisionAlertTests(unittest.TestCase):
         row = self.run_alert("Backups are stale", {"F-1": 0.1, "F-2": 0.99, "F-3": 0.3})
         self.assertEqual(row.match_method, "Decision-1")
         self.assertEqual(row.finding_ids, ["F-2"])
+        self.assertEqual(row.match_score, 0.99)
         self.assertEqual(row.our_section_id, "0003")
         self.assertEqual(row.our_rating, "YELLOW")
         self.assertEqual(row.verdict, "We rated lower")
@@ -203,6 +204,19 @@ class DecisionAlertTests(unittest.TestCase):
     def test_keep_band_overrides_a_wrong_word_overlap_match(self):
         row = self.run_alert("Standard users have default password.", {"F-1": 0.2, "F-2": 0.95})
         self.assertEqual((row.match_method, row.finding_ids), ("Decision-1", ["F-2"]))
+        self.assertEqual(row.match_score, 0.95)
+
+    def test_non_decision_rows_keep_word_overlap_score(self):
+        cases = [
+            ("Standard users have default password.", {"F-1": 0.6, "F-2": 0.1}),
+            ("Backups are stale", {"F-2": 0.7}),
+            ("Standard users have default password.", {"F-1": 0.2}),
+        ]
+        for text, scores in cases:
+            row = self.run_alert(text, scores)
+            plain = self.run_alert(text, {})
+            self.assertEqual(row.match_score, plain.match_score)
+            self.assertNotEqual(row.match_method, "Decision-1")
 
     def test_close_runner_up_is_noted_only(self):
         row = self.run_alert("Backups are stale", {"F-2": 0.99, "F-3": 0.97, "F-1": 0.1})
