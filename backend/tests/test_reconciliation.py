@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ewa_pipeline.report.reconciliation import clean_title, reconcile
+from ewa_pipeline.report.reconciliation import (
+    _heading_paths,
+    _heading_score,
+    _heading_words,
+    _words,
+    clean_title,
+    reconcile,
+)
 from ewa_pipeline.report.schemas import (
     AnalysisResult,
     DomainAnalysis,
@@ -250,6 +257,39 @@ class DecisionAlertTests(unittest.TestCase):
     def test_unknown_finding_ids_are_ignored(self):
         row = self.run_alert("Backups are stale", {"GONE": 0.99})
         self.assertEqual((row.verdict, row.match_method), ("Not covered", ""))
+
+
+class HeadingHelperTests(unittest.TestCase):
+    def test_parent_heading_counts(self):
+        tree = {"structure": [node("0001", "Top", [node("0002", "Mid heading", [node("0003", "Leaf")])])]}
+        paths = _heading_paths(tree)
+        self.assertEqual(paths["0003"], ["Top", "Mid heading", "Leaf"])
+        self.assertEqual(paths["0001"], ["Top"])
+        words = _words("Users with critical authorizations which should not be used in production")
+        score, title = _heading_score(
+            words, ["Top", "Critical authorizations, which should not be used in production", "Leaf"]
+        )
+        self.assertEqual((score >= 3, title), (True, "Critical authorizations, which should not be used in production"))
+
+    def test_number_prefix_and_sid_are_ignored(self):
+        self.assertEqual(
+            _heading_words("4.2 Kernel Patch Level for TP1", "TP1", "H4P"), {"kernel", "patch", "level"}
+        )
+        score, _ = _heading_score({"kernel", "patch", "level"}, ["4.2 Kernel Patch Level for TP1"], "TP1", "H4P")
+        self.assertEqual(score, 3)
+
+    def test_filler_words_alone_score_zero(self):
+        alert = _words("SAP HANA database: Recommended Audit configuration is not applied.")
+        self.assertEqual(_heading_score(alert, ["SAP HANA Database TP1"], "TP1", "H4P"), (0, ""))
+        # Only "configuration" survives from this heading, so it is not a hit either.
+        self.assertEqual(_heading_score(alert, ["SAP HANA Database Configuration"]), (0, ""))
+
+    def test_two_shared_words_is_not_a_hit(self):
+        self.assertEqual(_heading_score({"backup", "catalog"}, ["Backup catalog"]), (0, ""))
+
+    def test_heading_only_half_in_alert_is_not_a_hit(self):
+        alert = {"critical", "authorizations", "which"}
+        self.assertEqual(_heading_score(alert, ["Critical authorizations which allow anything goes"]), (0, ""))
 
 
 class EdgeCaseTests(unittest.TestCase):
