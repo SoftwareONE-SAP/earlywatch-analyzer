@@ -63,7 +63,7 @@ class Config(BaseModel):
     max_parent_context_chars: int = Field(default=4000, ge=0)
     decision_model: str = "Decision-1"
     decision_enabled: bool = False
-    decision_keep: float = Field(default=0.9, ge=0, le=1)  # at or above: a confirmed match
+    decision_keep: float = Field(default=0.85, ge=0, le=1)  # at or above: a confirmed match
     decision_possible: float = Field(default=0.5, ge=0, le=1)  # at or above: "please check"
     decision_workers: int = Field(default=8, ge=1)
     decision_budget_seconds: int = Field(default=300, ge=1)

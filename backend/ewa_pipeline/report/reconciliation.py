@@ -107,7 +107,7 @@ def reconcile(
     tree: dict | None,
     profile: SystemProfile | None,
     alert_scores: dict[int, dict[str, float]] | None = None,
-    keep: float = 0.9,
+    keep: float = 0.85,
     possible: float = 0.5,
 ) -> list[ReconciliationRow]:
     """One row per SAP alert and per SAP check. Never raises on odd input.
@@ -211,7 +211,7 @@ def _candidate(finding: Finding, p: float) -> str:
     return f"{finding.id} '{finding.title}' (p={p:.2f})"
 
 
-def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.9, possible=0.5) -> ReconciliationRow:
+def _alert_row(alert, findings, section_of, title_of, scores=None, keep=0.85, possible=0.5) -> ReconciliationRow:
     """Word overlap first; then Decision-1's view, when we have its scores for this alert."""
     row = _word_overlap_row(alert, findings, section_of, title_of)
     by_id: dict[str, Finding] = {}
