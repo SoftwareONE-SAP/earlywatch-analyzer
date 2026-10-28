@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report.excel_generator import generate
 from ewa_pipeline.report.schemas import (
@@ -96,36 +97,37 @@ class ExcelGeneratorTests(unittest.TestCase):
         names = self.wb.sheetnames
         self.assertEqual(names[0], "Executive Summary")
         self.assertEqual(names[1], "All Findings")
-        for expected in ("Software Configuration", "Performance Indicators", "Remediation Plan", "Token Usage"):
+        for expected in ("Software Configuration", "Performance Indicators", "Action Plan", "Token Usage"):
             self.assertIn(expected, names)
 
     def test_all_findings_rows_sorted_by_severity(self):
         ws = self.wb["All Findings"]
         headers = _headers(ws, 1)
-        self.assertEqual(headers[:3], ["Finding ID", "Section", "Severity"])
-        self.assertIn("Observed (from report)", headers)
-        self.assertIn("Interpretation", headers)
+        self.assertEqual(headers[:3], ["Ref.", "Section", "Severity"])
+        self.assertIn("What the SAP report says", headers)
+        self.assertIn("What it means", headers)
         self.assertEqual(ws.max_row, 3)  # header + exactly 2 findings
 
         rows = [dict(zip(headers, [c.value for c in ws[r]])) for r in (2, 3)]
-        self.assertEqual([r["Severity"] for r in rows], ["Critical", "Medium"])
+        self.assertEqual([r["Severity"] for r in rows], ["● Critical", "● Medium"])
 
         new, old = rows
-        self.assertEqual(new["Finding ID"], "F-002")
+        self.assertEqual(new["Ref."], "F-002")
         self.assertEqual(new["Section"], "Performance Indicators")
-        self.assertEqual(new["Risk Type"], "Performance, Cost")
-        self.assertEqual(new["Confidence"], "High")
-        self.assertEqual(new["Why this confidence"], "The report rates it RED.")
-        self.assertEqual(new["To confirm"], "Check ST04 / DBACOCKPIT.")
-        self.assertEqual(new["Observed (from report)"], "Statement hash 4f3a9c uses 61% of DB time")
-        self.assertEqual(new["Interpretation"], "One statement dominates database time.")
+        self.assertEqual(new["Risk area"], "Performance, Cost")
+        self.assertEqual(new["How sure we are"], "●●● High")
+        self.assertEqual(new["Why"], "The report rates it RED.")
+        self.assertEqual(new["How to confirm"], "Check ST04 / DBACOCKPIT.")
+        self.assertEqual(new["What the SAP report says"], "Statement hash 4f3a9c uses 61% of DB time")
+        self.assertEqual(new["What it means"], "One statement dominates database time.")
         self.assertEqual(new["Due date"], "2026-12-31")
+        self.assertEqual(new["Check latest SAP guidance first?"], "No")
 
-        # Old-style finding: new fields render as empty cells.
-        self.assertIn(old["Risk Type"], ("", None))
-        self.assertIn(old["Confidence"], ("", None))
-        self.assertIn(old["To confirm"], ("", None))
-        self.assertEqual(old["Observed (from report)"], "Kernel 753 [RED]")
+        # Old-style finding: new fields render as empty cells (or a dash for How sure).
+        self.assertIn(old["Risk area"], ("", None))
+        self.assertEqual(old["How sure we are"], "—")
+        self.assertIn(old["How to confirm"], ("", None))
+        self.assertEqual(old["What the SAP report says"], "Kernel 753 [RED]")
 
     def test_finding_id_links_to_section_sheet(self):
         ws = self.wb["All Findings"]
@@ -136,22 +138,36 @@ class ExcelGeneratorTests(unittest.TestCase):
     def test_section_sheet_layout_kept_for_summary_formulas(self):
         ws = self.wb["Software Configuration"]
         self.assertEqual(ws["A3"].value, "F-001")
-        self.assertEqual(ws["B3"].value, "Medium")
+        self.assertEqual(ws["B3"].value, "● Medium")
         headers = _headers(ws, 2)
-        self.assertEqual(headers[:2], ["ID", "Severity"])
-        self.assertIn("Observed (from report)", headers)
-        self.assertIn("Interpretation", headers)
+        self.assertEqual(headers[:2], ["Ref.", "Severity"])
+        self.assertIn("What the SAP report says", headers)
+        self.assertIn("What it means", headers)
         self.assertNotIn("Evidence", headers)
         self.assertNotIn("Description", headers)
-        self.assertEqual(headers[-3:], ["Confidence", "Risk Type", "To confirm"])
+        self.assertEqual(headers[-5:-2], ["How sure we are", "Risk area", "How to confirm"])
 
     def test_section_sheet_shows_new_fields(self):
         ws = self.wb["Performance Indicators"]
         headers = _headers(ws, 2)
         row = dict(zip(headers, [c.value for c in ws[3]]))
-        self.assertEqual(row["Confidence"], "High")
-        self.assertEqual(row["Risk Type"], "Performance, Cost")
-        self.assertEqual(row["To confirm"], "Check ST04 / DBACOCKPIT.")
+        self.assertEqual(row["How sure we are"], "●●● High")
+        self.assertEqual(row["Risk area"], "Performance, Cost")
+        self.assertEqual(row["How to confirm"], "Check ST04 / DBACOCKPIT.")
+
+    def test_reviewer_notes_columns_are_grouped_and_collapsed(self):
+        ws = self.wb["Performance Indicators"]
+        headers = _headers(ws, 2)
+        for name in ("Reviewer note: why check first", "Reviewer note: search query"):
+            dim = ws.column_dimensions[get_column_letter(headers.index(name) + 1)]
+            self.assertTrue(dim.hidden, name)
+            self.assertEqual(dim.outlineLevel, 1, name)
+        plan = self.wb["Action Plan"]
+        plan_headers = _headers(plan, 1)
+        dim = plan.column_dimensions[get_column_letter(plan_headers.index("Reviewer note: why check first") + 1)]
+        self.assertTrue(dim.hidden)
+        # Severity (column B) is never hidden: the Executive Summary counts it.
+        self.assertFalse(ws.column_dimensions["B"].hidden)
 
     def test_executive_summary_formulas_still_use_columns_a_and_b(self):
         ws = self.wb["Executive Summary"]
@@ -161,6 +177,17 @@ class ExcelGeneratorTests(unittest.TestCase):
         ]
         self.assertTrue(any("$A$3:$A$9999" in f and "COUNTA" in f for f in formulas))
         self.assertTrue(any("B$3:$B$9999" in f or "B3:B9999" in f.replace("$", "") for f in formulas))
+
+    def test_executive_summary_counts_use_wildcard_for_dot_severity(self):
+        # Severity cells read "● High", so the COUNTIF criteria need a leading wildcard.
+        ws = self.wb["Executive Summary"]
+        formulas = [
+            str(c.value) for row in ws.iter_rows() for c in row
+            if isinstance(c.value, str) and c.value.startswith("=COUNTIF")
+        ]
+        for word in ("Critical", "High", "Medium", "Low"):
+            self.assertTrue(any(f.endswith(f',"*{word}")') for f in formulas), word)
+        self.assertFalse(any(f.endswith(',"High")') for f in formulas))
 
     def test_section_named_all_findings_does_not_collide(self):
         result = build_result()
@@ -320,8 +347,7 @@ class WorstSeverityTests(unittest.TestCase):
         rows = []
         for r in range(hdr[0].row + 1, ws.max_row + 1):
             if ws.cell(row=r, column=2).value:
-                rows.append((ws.cell(row=r, column=2).value, ws.cell(row=r, column=3).value,
-                             ws.cell(row=r, column=3).fill.fgColor.rgb))
+                rows.append((ws.cell(row=r, column=2).value, ws.cell(row=r, column=3).value))
         return rows
 
     def test_worst_severity_and_sorting(self):
@@ -335,8 +361,7 @@ class WorstSeverityTests(unittest.TestCase):
         ]
         rows = self._summary_rows(result)
         self.assertEqual([r[0] for r in rows], ["Serious", "Mild"])
-        self.assertEqual([r[1] for r in rows], ["High", "Medium"])
-        self.assertTrue(rows[1][2].endswith("FFC000"))
+        self.assertEqual([r[1] for r in rows], ["● High", "● Medium"])
 
     def test_ties_sorted_by_finding_count(self):
         result = build_result()

@@ -23,7 +23,6 @@ _C_TITLE_BG = "1F4E79"
 _C_BORDER   = "BFBFBF"
 
 _SEV_BG = {"Critical": "C00000", "High": "ED7D31", "Medium": "FFC000", "Low": "548235"}
-_SEV_FG = {"Critical": "FFFFFF", "High": "FFFFFF", "Medium": "000000", "Low": "FFFFFF"}
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
 _HEALTH_BG = {"Critical": "C00000", "Warning": "ED7D31", "Healthy": "548235"}
 
@@ -81,6 +80,43 @@ def _autofit_columns(ws, min_width=8, max_width=55, skip_cols=()):
                 col_widths[col] = length
     for col, length in col_widths.items():
         ws.column_dimensions[get_column_letter(col)].width = max(min_width, length + 2)
+
+# Column widths by header name: short 10-14, titles 30-40, long text 50-60.
+_WIDTHS = {
+    "Ref.": 10, "Severity": 14, "Effort": 12, "Priority": 14, "Due date": 13,
+    "How sure we are": 16, "Check latest SAP guidance first?": 18,
+    "SAP transactions": 20, "Risk area": 20,
+    "Section": 32, "Title": 36,
+    "What it means": 55, "What the SAP report says": 55, "Impact": 50,
+    "Recommended action": 55, "Why": 50, "How to confirm": 50,
+    "Reviewer note: why check first": 50, "Reviewer note: search query": 50,
+}
+
+def _set_widths(ws, header_row, ncols):
+    """Fixed width per known header name; other columns fit their content (cap 45)."""
+    known = set(range(ncols + 1, ws.max_column + 2))
+    for col in range(1, ncols + 1):
+        width = _WIDTHS.get(ws.cell(header_row, col).value)
+        if width:
+            ws.column_dimensions[get_column_letter(col)].width = width
+            known.add(col)
+    _autofit_columns(ws, min_width=8, max_width=45, skip_cols=known)
+
+def _collapse_group(ws, first_col, last_col):
+    """Reviewer-only columns: grouped and collapsed (click + above the sheet to open)."""
+    for col in range(first_col, last_col + 1):
+        dim = ws.column_dimensions[get_column_letter(col)]
+        dim.outlineLevel = 1
+        dim.hidden = True
+    ws.column_dimensions[get_column_letter(last_col + 1)].collapsed = True
+
+def _guidance_cell(c, required):
+    """Check latest SAP guidance first?  Yes in bold, No in grey."""
+    c.value = "Yes" if required else "No"
+    c.font = _font(bold=True) if required else _font(color=xs.MUTED)
+
+def _link_font():
+    return xs.font(color=_C_LINK, underline="single")
 
 def _kpi_tile(ws, top_left, bottom_right, label, value, bg, fg="FFFFFF"):
     """Card-style KPI tile across a merged cell range."""
@@ -180,7 +216,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     # Section table
     tbl_hdr_row = r
     col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
-    _hdr_row(ws, tbl_hdr_row, col_headers, start_col=2)
+    xs.header_row(ws, tbl_hdr_row, col_headers, start_col=2, numeric_cols=(4, 5, 6, 7, 8))
     ws.auto_filter.ref = f"B{tbl_hdr_row}:H{tbl_hdr_row}"
 
     # Worst section first: by worst severity, then most findings, then original order.
@@ -200,27 +236,24 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
 
         lc = ws.cell(row=r, column=2, value=da.section_title)
         lc.hyperlink = f"#'{sname}'!A1"
-        lc.font = _font(color=_C_LINK)
+        lc.font = _link_font()
 
-        hc = ws.cell(row=r, column=3, value=worst)
-        hc.font = _font(bold=True, color=_SEV_FG.get(worst, "000000"))
-        hc.alignment = _align(h="center")
+        hc = ws.cell(row=r, column=3, value=xs.severity_text(worst) if worst else xs.muted(xs.DASH))
+        hc.font = _font()
+        hc.alignment = _align(h="left")
 
         sev_col = "B"
         data_range = f"{ref}!${sev_col}$3:${sev_col}$9999"
         ws.cell(row=r, column=4, value=f"=COUNTA({ref}!$A$3:$A$9999)")
-        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"Critical")')
-        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"High")')
-        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"Medium")')
-        ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"Low")')
+        # Wildcard: the Severity cells read "● High" (dot + word).
+        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"*Critical")')
+        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"*High")')
+        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"*Medium")')
+        ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"*Low")')
 
         for col in range(4, 9):
-            ws.cell(row=r, column=col).alignment = _align(h="center")
+            ws.cell(row=r, column=col).alignment = _align(h="right")
             ws.cell(row=r, column=col).font = _font()
-
-        # Severity colour overrides alt shade (blank cell keeps the alt shade)
-        if worst:
-            hc.fill = _fill(_SEV_BG[worst])
 
         r += 1
 
@@ -231,50 +264,43 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     ws = wb.create_sheet(sheet_name)
     _apply_app_style(ws)
 
-    # Columns A (ID) and B (Severity) must stay first: the Executive Summary
+    # Columns A (Ref.) and B (Severity) must stay first: the Executive Summary
     # counts findings with formulas over those two columns. New columns go last.
-    COLS = ["ID", "Severity", "Title", "Interpretation", "Observed (from report)",
-            "Impact", "Action", "Transactions", "Effort", "Priority",
-            "External Validation", "Validation Reason", "Validation Query",
-            "Confidence", "Risk Type", "To confirm"]
-    wrap_cols = (4, 5, 6, 7, 12, 13, 16)
+    # The last two columns are reviewer notes, grouped and collapsed.
+    COLS = ["Ref.", "Severity", "Title", "What it means", "What the SAP report says",
+            "Impact", "Recommended action", "SAP transactions", "Effort", "Priority",
+            "Check latest SAP guidance first?", "How sure we are", "Risk area",
+            "How to confirm", "Reviewer note: why check first", "Reviewer note: search query"]
 
     # Row 1: full-width back-link
     ws.merge_cells(f"A1:{get_column_letter(len(COLS))}1")
     bl = ws.cell(row=1, column=1, value="← Executive Summary")
     bl.hyperlink = "#'Executive Summary'!A1"
-    bl.font = _font(color=_C_LINK)
+    bl.font = _link_font()
     bl.alignment = _align(h="left")
 
     # Row 2: column headers
     _hdr_row(ws, 2, COLS)
     ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A2:{get_column_letter(len(COLS))}2"
 
     for i, f in enumerate(da.findings):
         r = 3 + i
         vals = [
-            f.id, f.severity, f.title, f.description, f.evidence,
+            f.id, xs.severity_text(f.severity), f.title, f.description, f.evidence,
             f.impact, f.remediation.action,
             ", ".join(f.remediation.sap_transactions),
             f.remediation.effort_estimate, f.remediation.priority,
-            "Required" if f.remediation.external_validation_required else "Not required",
-            f.remediation.validation_reason,
-            f.remediation.validation_query,
-            f.confidence or "", ", ".join(f.risk_types), f.to_confirm,
+            None, xs.sure_dots(f.confidence), ", ".join(f.risk_types), f.to_confirm,
+            f.remediation.validation_reason, f.remediation.validation_query,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(wrap=(col in wrap_cols))
+        _guidance_cell(ws.cell(row=r, column=11), f.remediation.external_validation_required)
 
-
-        sev = f.severity
-        ws.cell(row=r, column=2).fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
-        ws.cell(row=r, column=2).font = _font(bold=True, color=_SEV_FG.get(sev, "000000"))
-        ws.cell(row=r, column=2).alignment = _align(h="center")
-
-    _autofit_columns(ws, min_width=8, max_width=55)
+    xs.apply_table_style(ws, header=2, last_row=max(2, 2 + len(da.findings)), last_col=len(COLS))
+    _set_widths(ws, 2, len(COLS))
+    _collapse_group(ws, 15, 16)
 
 
 def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
@@ -283,15 +309,14 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     _apply_app_style(ws)
 
     COLS = [
-        "Finding ID", "Section", "Severity", "Risk Type", "Title",
-        "Observed (from report)", "Interpretation", "Confidence",
-        "Why this confidence", "To confirm", "Impact", "Action",
-        "Transactions", "Effort", "Priority", "Due date", "External Validation",
+        "Ref.", "Section", "Severity", "Risk area", "Title",
+        "What the SAP report says", "What it means", "How sure we are",
+        "Why", "How to confirm", "Impact", "Recommended action",
+        "SAP transactions", "Effort", "Priority", "Due date",
+        "Check latest SAP guidance first?",
     ]
-    wrap_cols = (5, 6, 7, 9, 10, 11, 12, 13)
     _hdr_row(ws, 1, COLS)
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
 
     _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
     rows: list[tuple] = []
@@ -303,33 +328,29 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     for i, (_, _, f_idx, da, f) in enumerate(rows):
         r = 2 + i
         vals = [
-            f.id, da.section_title, f.severity, ", ".join(f.risk_types), f.title,
-            f.evidence, f.description, f.confidence or "",
+            f.id, da.section_title, xs.severity_text(f.severity), ", ".join(f.risk_types), f.title,
+            f.evidence, f.description, xs.sure_dots(f.confidence),
             f.confidence_reason, f.to_confirm, f.impact, f.remediation.action,
             ", ".join(f.remediation.sap_transactions),
             f.remediation.effort_estimate, f.remediation.priority, f.due_date,
-            "Required" if f.remediation.external_validation_required else "Not required",
+            None,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(v="top", wrap=(col in wrap_cols))
+        _guidance_cell(ws.cell(row=r, column=17), f.remediation.external_validation_required)
 
+    xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
 
-        # Finding ID links to the finding's row on its section sheet.
+    # Ref. links to the finding's row on its section sheet (after styling, which resets fonts only on borders).
+    for i, (_, _, f_idx, da, f) in enumerate(rows):
         sname = sheet_map.get(da.section_id)
         if sname:
-            idc = ws.cell(row=r, column=1)
+            idc = ws.cell(row=2 + i, column=1)
             idc.hyperlink = f"#'{sname}'!A{3 + f_idx}"
-            idc.font = _font(color=_C_LINK)
+            idc.font = _link_font()
 
-        sev = f.severity
-        sc = ws.cell(row=r, column=3)
-        sc.fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
-        sc.font = _font(bold=True, color=_SEV_FG.get(sev, "000000"))
-        sc.alignment = _align(h="center", v="top")
-
-    _autofit_columns(ws, min_width=8, max_width=55)
+    _set_widths(ws, 1, len(COLS))
 
 
 def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str]):
@@ -459,48 +480,40 @@ def _build_cross_references(wb: Workbook, xrefs: list[CrossReference]):
 
 
 def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
-    ws = wb.create_sheet("Remediation Plan")
+    ws = wb.create_sheet("Action Plan")
     _apply_app_style(ws)
 
     COLS = [
-        "Finding ID", "Section", "Severity", "Title", "Action", "Transactions",
-        "Effort", "Priority", "External Validation", "Validation Reason",
-        "Validation Query",
+        "Ref.", "Section", "Severity", "Title", "Recommended action", "SAP transactions",
+        "Effort", "Priority", "Check latest SAP guidance first?",
+        "Reviewer note: why check first", "Reviewer note: search query",
     ]
     _hdr_row(ws, 1, COLS)
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS))}1"
 
     _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
     rows: list[tuple] = []
     for da in analyses:
         for f in da.findings:
-            rows.append((
-                _SEV_ORDER.get(f.severity, 9),
-                f.id, da.section_title, f.severity, f.title,
-                f.remediation.action, ", ".join(f.remediation.sap_transactions),
-                f.remediation.effort_estimate, f.remediation.priority,
-                "Required" if f.remediation.external_validation_required else "Not required",
-                f.remediation.validation_reason,
-                f.remediation.validation_query,
-            ))
+            rows.append((_SEV_ORDER.get(f.severity, 9), f, da.section_title))
     rows.sort(key=lambda x: x[0])
 
-    for i, row_data in enumerate(rows):
+    for i, (_, f, section_title) in enumerate(rows):
         r = 2 + i
-        vals = row_data[1:]
+        vals = [
+            f.id, section_title, xs.severity_text(f.severity), f.title,
+            f.remediation.action, ", ".join(f.remediation.sap_transactions),
+            f.remediation.effort_estimate, f.remediation.priority, None,
+            f.remediation.validation_reason, f.remediation.validation_query,
+        ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-            c.alignment = _align(wrap=(col in (5, 6, 10, 11)))
+        _guidance_cell(ws.cell(row=r, column=9), f.remediation.external_validation_required)
 
-
-        sev = vals[2]
-        ws.cell(r, 3).fill = _fill(_SEV_BG.get(sev, "FFFFFF"))
-        ws.cell(r, 3).font = _font(bold=True, color=_SEV_FG.get(sev, "000000"))
-        ws.cell(r, 3).alignment = _align(h="center")
-
-    _autofit_columns(ws, min_width=8, max_width=55)
+    xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
+    _set_widths(ws, 1, len(COLS))
+    _collapse_group(ws, 10, 11)
 
 
 def _build_document_structure(wb: Workbook, tree: dict):
@@ -596,7 +609,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Remediation Plan", "Document Structure",
+    used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Action Plan", "Document Structure",
                       "Token Usage", "Analysis Tasks", "Source Coverage", "SAP vs Us", "No Issues Found"}
     for da in result.domain_analyses:
         if not da.findings:
