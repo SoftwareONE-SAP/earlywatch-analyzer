@@ -9,6 +9,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report import excel_style as xs
+from ewa_pipeline.report import reconciliation_display as rd
 from ewa_pipeline.report.schemas import (
     AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow,
 )
@@ -30,13 +31,6 @@ _HEALTH_BG = {"Critical": "C00000", "Warning": "ED7D31", "Healthy": "548235"}
 _RATING_BG = {"RED": "C00000", "YELLOW": "FFC000", "GREEN": "548235"}
 _RATING_FG = {"RED": "FFFFFF", "YELLOW": "000000", "GREEN": "FFFFFF"}
 _RATING_ORDER = {"RED": 0, "YELLOW": 1, "GREEN": 2}
-_VERDICT_BG = {
-    "Agree": "C6E0B4",
-    "We rated higher": "FFE699",
-    "We rated lower": "FFE699",
-    "Not covered": "F4B084",
-}
-_VERDICT_DEFAULT_BG = "D9D9D9"
 
 _NUM = '#,##0'
 
@@ -90,6 +84,11 @@ _WIDTHS = {
     "What it means": 55, "What the SAP report says": 55, "Impact": 50,
     "Recommended action": 55, "Why": 50, "How to confirm": 50,
     "Reviewer note: why check first": 50, "Reviewer note: search query": 50,
+    "SAP list": 11, "SAP topic": 24, "What SAP says": 40, "SAP rating": 14,
+    "SoftwareONE rating": 18, "Our finding": 36, "Result": 26, "Explanation": 55,
+    "Report section": 30,
+    "Reviewer note: refs": 18, "Reviewer note: score": 14, "Reviewer note: matched by": 20,
+    "Reviewer note: original note": 55,
 }
 
 def _set_widths(ws, header_row, ncols):
@@ -353,64 +352,95 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     _set_widths(ws, 1, len(COLS))
 
 
-def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str]):
-    """SAP's own ratings next to ours: verdict counts on top, one row per alert/check below."""
-    ws = wb.create_sheet("SAP vs Us")
+_SAP_VS_US = "SAP vs SoftwareONE"
+
+# Results a reader should look at first: shown in bold.
+_BOLD_RESULTS = {rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK}
+_RESULT_ORDER = [rd.RESULT_AGREE, rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK,
+                 rd.RESULT_NOT_FOUND, rd.RESULT_NOT_ANALYSED, rd.RESULT_NO_DETAIL,
+                 rd.RESULT_NO_RATING]
+
+
+def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str],
+                     analyses: list[DomainAnalysis]):
+    """SAP's own ratings next to ours: result counts on top, one row per alert/check below."""
+    ws = wb.create_sheet(_SAP_VS_US)
     _apply_app_style(ws)
 
-    # Summary block: verdict counts, split by Alerts and Checks.
-    verdicts: list[str] = []
-    for row in rows:
-        if row.verdict not in verdicts:
-            verdicts.append(row.verdict)
-    ws.cell(1, 1, "Verdict counts").font = _font(bold=True, color=_C_TITLE_BG, size=13)
-    _hdr_row(ws, 2, ["Verdict", "Alerts", "Checks", "Total"])
-    for i, verdict in enumerate(verdicts):
-        r = 3 + i
-        alerts = sum(1 for x in rows if x.verdict == verdict and x.source == "Alert")
-        checks = sum(1 for x in rows if x.verdict == verdict and x.source == "Check")
-        vc = ws.cell(r, 1, verdict or "(none)")
-        vc.font = _font(bold=True)
-        vc.fill = _fill(_VERDICT_BG.get(verdict, _VERDICT_DEFAULT_BG))
-        for col, val in ((2, alerts), (3, checks), (4, alerts + checks)):
-            c = ws.cell(r, col, val)
-            c.font = _font()
-            c.alignment = _align(h="center")
+    findings_by_id: dict = {}
+    finding_row: dict[str, tuple[str, int]] = {}  # finding id -> (section id, row on its sheet)
+    for da in analyses:
+        for i, f in enumerate(da.findings):
+            findings_by_id.setdefault(f.id, f)
+            finding_row.setdefault(f.id, (da.section_id, 3 + i))
+    displays = [rd.describe(row, findings_by_id) for row in rows]
 
-    hdr = 3 + len(verdicts) + 1
-    COLS = ["Source", "SAP Topic", "SAP Item", "SAP Rating", "Our Section", "Our Rating",
-            "Our Finding IDs", "Verdict", "Reason", "Match score", "Matched by"]
+    ws.cell(1, 1, _SAP_VS_US).font = _font(bold=True, size=16)
+    ws.cell(2, 1, "SAP's own ratings next to ours. Bold results are worth a look. "
+                  "Dots show how sure we are: "
+                  f"{xs.DOT * 3} High, {xs.DOT * 2}{xs.EMPTY} Medium, {xs.DOT}{xs.EMPTY * 2} Low."
+            ).font = _font(size=10, color=xs.NOTE)
+
+    # Summary block: result counts, split by Alerts and Checks.
+    seen = {d.result for d in displays}
+    results = [r for r in _RESULT_ORDER if r in seen] + sorted(seen - set(_RESULT_ORDER))
+    sum_hdr = 4
+    xs.header_row(ws, sum_hdr, ["Result", None, None, "Alerts", "Checks", "Total"], numeric_cols=(4, 5, 6))
+    for i, result_name in enumerate(results):
+        r = sum_hdr + 1 + i
+        alerts = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Alert")
+        checks = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Check")
+        ws.cell(r, 1, result_name).font = _font(bold=result_name in _BOLD_RESULTS)
+        for col, val in ((4, alerts), (5, checks), (6, alerts + checks)):
+            ws.cell(r, col, val).font = _font()
+    sum_last = sum_hdr + len(results)
+    xs.apply_table_style(ws, header=sum_hdr, last_row=sum_last, last_col=6,
+                         numeric_cols=(4, 5, 6), filter=False)
+    for r in range(sum_hdr + 1, sum_last + 1):  # labels run across the empty cells beside them
+        ws.cell(r, 1).alignment = _align(v="top")
+
+    hdr = sum_last + 2
+    COLS = ["SAP list", "SAP topic", "What SAP says", "SAP rating", "SoftwareONE rating",
+            "Our finding", "Result", "How sure we are", "Explanation", "Report section",
+            "Reviewer note: refs", "Reviewer note: score", "Reviewer note: matched by",
+            "Reviewer note: original note"]
     _hdr_row(ws, hdr, COLS)
     ws.freeze_panes = f"A{hdr + 1}"
-    ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(COLS))}{hdr}"
 
+    for i, (row, disp) in enumerate(zip(rows, displays)):
+        r = hdr + 1 + i
+        fid = row.finding_ids[0] if row.finding_ids else None
+        finding = findings_by_id.get(fid) if fid else None
+        title = finding.title if finding is not None else ""
+        if title and len(row.finding_ids) > 1:
+            title += f" (+{len(row.finding_ids) - 1} more)"
+        vals = [row.source, row.sap_topic, row.sap_item, xs.rating_text(row.sap_rating),
+                xs.rating_text(row.our_rating), title, disp.result, xs.sure_dots(disp.how_sure),
+                disp.explanation, row.our_section_title, ", ".join(row.finding_ids),
+                row.match_score if row.match_score is not None else "", row.match_method,
+                row.reason]
+        for col, val in enumerate(vals, 1):
+            ws.cell(r, col, val).font = _font()
+        ws.cell(r, 7).font = _font(bold=disp.result in _BOLD_RESULTS)
+
+    last = max(hdr, hdr + len(rows))
+    xs.apply_table_style(ws, header=hdr, last_row=last, last_col=len(COLS))
+
+    # Links (after styling): finding -> its row on the section tab, section -> top of its tab.
     for i, row in enumerate(rows):
         r = hdr + 1 + i
-        vals = [row.source, row.sap_topic, row.sap_item, row.sap_rating, row.our_section_title,
-                row.our_rating, ", ".join(row.finding_ids), row.verdict, row.reason,
-                row.match_score if row.match_score is not None else "", row.match_method]
-        for col, val in enumerate(vals, 1):
-            c = ws.cell(r, col, val)
-            c.font = _font()
-            c.alignment = _align(v="top", wrap=(col in (2, 3, 5, 9)))
-
+        fid = row.finding_ids[0] if row.finding_ids else None
+        target = finding_row.get(fid) if fid else None
+        if target and sheet_map.get(target[0]) and ws.cell(r, 6).value:
+            ws.cell(r, 6).hyperlink = f"#'{sheet_map[target[0]]}'!A{target[1]}"
+            ws.cell(r, 6).font = _link_font()
         sname = sheet_map.get(row.our_section_id)
-        if sname:
-            lc = ws.cell(r, 5)
-            lc.hyperlink = f"#'{sname}'!A1"
-            lc.font = _font(color=_C_LINK)
+        if sname and row.our_section_title:
+            ws.cell(r, 10).hyperlink = f"#'{sname}'!A1"
+            ws.cell(r, 10).font = _link_font()
 
-        for col, rating in ((4, row.sap_rating), (6, row.our_rating)):
-            if rating in _RATING_BG:
-                c = ws.cell(r, col)
-                c.fill = _fill(_RATING_BG[rating])
-                c.font = _font(bold=True, color=_RATING_FG[rating])
-                c.alignment = _align(h="center", v="top")
-        vc = ws.cell(r, 8)
-        vc.fill = _fill(_VERDICT_BG.get(row.verdict, _VERDICT_DEFAULT_BG))
-        vc.font = _font(bold=True)
-
-    _autofit_columns(ws, min_width=8, max_width=55)
+    _set_widths(ws, hdr, len(COLS))
+    _collapse_group(ws, 11, 14)
 
 
 def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
@@ -590,7 +620,7 @@ def _build_token_usage(wb: Workbook, usage: TokenUsage):
 # ── Final pass over every tab ─────────────────────────────────────────────────
 
 # The five front tabs get the navy tab colour; every other tab has none.
-_FRONT_TABS = set(xs.FRONT_TABS) | {"SAP vs Us"}
+_FRONT_TABS = set(xs.FRONT_TABS)
 
 def _finish_sheets(wb: Workbook) -> None:
     """Tab colour policy and print setup. Freeze panes were set by each builder."""
@@ -610,7 +640,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     sheet_map: dict[str, str] = {}
     used: set[str] = {"Executive Summary", "All Findings", "Cross-References", "Action Plan", "Document Structure",
-                      "Token Usage", "Analysis Tasks", "Source Coverage", "SAP vs Us", "No Issues Found"}
+                      "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found"}
     for da in result.domain_analyses:
         if not da.findings:
             continue
@@ -625,7 +655,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _build_executive_summary(wb, result, sheet_map)
     _build_all_findings(wb, result, sheet_map)
     if result.reconciliation:
-        _build_sap_vs_us(wb, result.reconciliation, sheet_map)
+        _build_sap_vs_us(wb, result.reconciliation, sheet_map, result.domain_analyses)
     if result.coverage:
         _build_verified_healthy(wb, result)
     for da in result.domain_analyses:

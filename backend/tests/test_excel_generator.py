@@ -222,25 +222,47 @@ class SapVsUsTests(unittest.TestCase):
             _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
         ]
         wb = self._generate(result)
-        self.assertEqual(wb.sheetnames[:3], ["Executive Summary", "All Findings", "SAP vs Us"])
-        ws = wb["SAP vs Us"]
+        self.assertEqual(wb.sheetnames[:3], ["Executive Summary", "All Findings", "SAP vs SoftwareONE"])
+        ws = wb["SAP vs SoftwareONE"]
 
-        counts = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)
-                  for r in range(3, 6)}
+        counts = {ws.cell(r, 1).value: (ws.cell(r, 4).value, ws.cell(r, 5).value, ws.cell(r, 6).value)
+                  for r in range(5, 9)}
         self.assertEqual(counts["Agree"], (1, 1, 2))
-        self.assertEqual(counts["Not covered"], (1, 0, 1))
-        self.assertEqual(counts["We rated higher"], (0, 1, 1))
+        self.assertEqual(counts["We rate it more serious"], (0, 1, 1))
+        self.assertEqual(counts["Not found in our analysis"], (1, 0, 1))
 
-        hdr_row = next(r for r in range(1, 15) if ws.cell(r, 1).value == "Source")
+        hdr_row = next(r for r in range(1, 15) if ws.cell(r, 1).value == "SAP list")
         headers = _headers(ws, hdr_row)
-        self.assertEqual(headers[:4], ["Source", "SAP Topic", "SAP Item", "SAP Rating"])
+        self.assertEqual(headers[:5], ["SAP list", "SAP topic", "What SAP says", "SAP rating", "SoftwareONE rating"])
         self.assertEqual(ws.max_row - hdr_row, 4)  # one row per reconciliation row
         first = dict(zip(headers, [c.value for c in ws[hdr_row + 1]]))
-        self.assertEqual(first["Our Finding IDs"], "F-001, F-003")
-        self.assertEqual(first["Verdict"], "Agree")
-        self.assertEqual(first["Match score"], 0.97)
-        self.assertEqual(first["Matched by"], "Decision-1")
+        self.assertEqual(first["Result"], "Agree")
+        self.assertEqual(first["SAP rating"], "● Red")
+        self.assertEqual(first["SoftwareONE rating"], "● Red")
+        self.assertEqual(first["How sure we are"], "●●● High")
+        self.assertEqual(first["Our finding"], "Kernel release out of maintenance (+1 more)")
+        target = ws.cell(hdr_row + 1, headers.index("Our finding") + 1).hyperlink
+        self.assertEqual(target.target or target.location, "#'Software Configuration'!A3")
+        self.assertEqual(first["Reviewer note: refs"], "F-001, F-003")
+        self.assertEqual(first["Reviewer note: score"], 0.97)
+        self.assertEqual(first["Reviewer note: matched by"], "Decision-1")
         self.assertEqual(ws.freeze_panes, f"A{hdr_row + 1}")
+
+        # Bold only for the results a reader should look at; reviewer notes are collapsed.
+        result_col = headers.index("Result") + 1
+        self.assertFalse(ws.cell(hdr_row + 1, result_col).font.b)  # Agree
+        self.assertTrue(ws.cell(hdr_row + 4, result_col).font.b)   # more serious
+        for name in headers:
+            if name.startswith("Reviewer note"):
+                self.assertTrue(ws.column_dimensions[get_column_letter(headers.index(name) + 1)].hidden, name)
+
+        # No solid fills and no matching jargon in anything a reader can see.
+        for row in ws.iter_rows():
+            for cell in row:
+                self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
+                if cell.value is not None and not ws.column_dimensions[cell.column_letter].hidden:
+                    for jargon in ("Decision", "p=", "overlap"):
+                        self.assertNotIn(jargon, str(cell.value), cell.coordinate)
 
     def test_verified_healthy_rows_and_sap_disagrees(self):
         result = build_result()  # sections "1" and "2" have findings
@@ -267,12 +289,12 @@ class SapVsUsTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[1:4], ["All Findings", "SAP vs Us", "No Issues Found"])
+        self.assertEqual(names[1:4], ["All Findings", "SAP vs SoftwareONE", "No Issues Found"])
 
     def test_old_payload_has_neither_sheet(self):
         wb = self._generate(build_result())
         self.assertNotIn("Verified Healthy", wb.sheetnames)
-        self.assertNotIn("SAP vs Us", wb.sheetnames)
+        self.assertNotIn("SAP vs SoftwareONE", wb.sheetnames)
         self.assertNotIn("No Issues Found", wb.sheetnames)
 
     def test_coverage_without_healthy_sections_skips_sheet(self):
@@ -312,7 +334,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                         self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
 
     def test_only_front_tabs_have_navy_tab_colour(self):
-        front = {"Executive Summary", "All Findings", "SAP vs Us", "No Issues Found"}
+        front = {"Executive Summary", "All Findings", "SAP vs SoftwareONE", "No Issues Found"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
             if ws.title in front:
