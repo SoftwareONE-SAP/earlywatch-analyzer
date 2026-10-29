@@ -63,7 +63,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
     def test_every_expected_tab_is_present(self):
         names = self.wb.sheetnames
         for name in ("How to read this workbook", "Priority Actions", "Findings", "SAP vs SoftwareONE",
-                     "No Issues Found", "Risk Heatmap", "Linked Issues", "Document Structure",
+                     "No Issues Found", "Risk Heatmap", "Document Structure",
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
 

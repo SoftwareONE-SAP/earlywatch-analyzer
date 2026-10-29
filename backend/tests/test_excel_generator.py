@@ -413,29 +413,6 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
         self.assertEqual(ws.print_title_rows, "$1:$1")
 
 
-class LinkedIssuesTests(unittest.TestCase):
-    def test_linked_issues_tab_shows_titles_not_only_refs(self):
-        result = build_result()
-        result.cross_references = [CrossReference(
-            title="Old kernel and slow SQL", related_findings=["F-001", "F-999"],
-            correlation_description="Both hurt response time.", combined_impact="Slow system.",
-            recommended_action="Fix both together.")]
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "out.xlsx"
-            generate(result, path)
-            wb = load_workbook(path)
-        self.assertNotIn("Cross-References", wb.sheetnames)
-        ws = wb["Linked Issues"]
-        self.assertEqual([c.value for c in ws[1]][:3], ["Title", "Related findings", "How they connect"])
-        self.assertEqual(ws["B2"].value, "F-001 Kernel release out of maintenance\nF-999")
-        self.assertEqual(ws.sheet_view.zoomScale, 100)
-        how = " ".join(str(c.value) for row in wb["How to read this workbook"].iter_rows() for c in row)
-        self.assertIn("Linked Issues", how)
-        self.assertNotIn("Cross-References", how)
-        names = wb.sheetnames
-        self.assertLess(names.index("Findings"), names.index("Linked Issues"))
-
-
 class PriorityActionsTests(unittest.TestCase):
     def _sheet(self, result):
         tmp = tempfile.TemporaryDirectory()
@@ -518,6 +495,62 @@ class PriorityActionsTests(unittest.TestCase):
         result = build_result()
         result.system_profile = SystemProfile(product="SAP S/4HANA")
         self.assertEqual(self._sheet(result)["B1"].value, expected)
+
+    def _risk_result(self):
+        result = build_result()
+        result.top_5_priority_actions = ["Tune the statement (F-002)."]
+        result.cross_references = [CrossReference(
+            title="Old kernel and slow SQL", related_findings=["F-001", "F-999", "F-002"],
+            correlation_description="Both hurt response time.", combined_impact="Slow system.",
+            recommended_action="Fix both together.")]
+        return result
+
+    def test_risks_that_add_up_block_follows_the_top_actions(self):
+        ws = self._sheet(self._risk_result())
+        self.assertEqual(ws["B6"].value, None)  # one blank row after the single action
+        self.assertEqual(ws["B7"].value, "Risks that add up")
+        self.assertEqual(ws["B8"].value, "Old kernel and slow SQL\n"
+                                         "Why it matters together: Both hurt response time. Slow system.\n"
+                                         "What to do: Fix both together.")
+        self.assertEqual(ws["B7"].font.b, True)
+
+    def test_risk_refs_are_linked_and_unknown_ids_are_skipped(self):
+        ws = self._sheet(self._risk_result())
+        self.assertIn("B8:G9", [str(m) for m in ws.merged_cells.ranges])
+        self.assertEqual([ws["H8"].value, ws["H9"].value], ["F-001", "F-002"])
+        self.assertEqual(self._link(ws["H8"]), "#'Findings'!A3")
+        self.assertEqual(self._link(ws["H9"]), "#'Findings'!A2")
+        self.assertIsNone(ws["H10"].value)
+
+    def test_risk_title_is_bold_in_rich_text(self):
+        from openpyxl.cell.rich_text import CellRichText
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(self._risk_result(), path)
+            ws = load_workbook(path, rich_text=True)["Priority Actions"]
+        value = ws["B8"].value
+        self.assertIsInstance(value, CellRichText)
+        parts = [p for p in value if not isinstance(p, str)]
+        self.assertTrue(parts[0].font.b)
+        self.assertEqual(parts[0].text, "Old kernel and slow SQL")
+        self.assertTrue(any(p.text == "What to do: " and p.font.b for p in parts))
+
+    def test_no_cross_references_means_no_block(self):
+        texts = self._texts(self._sheet(build_result()))
+        self.assertNotIn("Risks that add up", texts)
+
+    def test_risk_without_known_refs_still_shows_one_row(self):
+        result = self._risk_result()
+        result.cross_references[0].related_findings = ["F-999"]
+        ws = self._sheet(result)
+        self.assertIn("Old kernel and slow SQL", ws["B8"].value)
+        self.assertIsNone(ws["H8"].value)
+
+    def test_there_is_no_linked_issues_tab(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(self._risk_result(), path)
+            self.assertNotIn("Linked Issues", load_workbook(path).sheetnames)
 
 
 if __name__ == "__main__":

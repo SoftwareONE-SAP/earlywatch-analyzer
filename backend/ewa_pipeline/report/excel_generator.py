@@ -105,7 +105,6 @@ def _link_font():
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
 _HOW_TO_READ = "How to read this workbook"
-_LINKED = "Linked Issues"
 _FINDINGS = "Findings"
 _PRIORITY = "Priority Actions"
 
@@ -137,8 +136,6 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     if _HEATMAP in tabs:
         add(f"{_HEATMAP} " + xs.DASH + " which report sections carry which kinds of risk, coloured by "
             "the most serious finding.")
-    if _LINKED in tabs:
-        add(f"{_LINKED} " + xs.DASH + " findings that are connected and are best handled together.")
 
     add("How serious is a finding?", "head")
     add(xs.legend_line(xs.severity_text("Critical"), "needs attention straight away."))
@@ -235,24 +232,7 @@ def _build_priority_actions(wb: Workbook, result: AnalysisResult):
     for i, action in enumerate(result.top_5_priority_actions, 1):
         clean = _clean_action(action)
         text = f"{i}. {clean}"
-        refs = _refs_in_text(clean, result)
-        k = max(1, len(refs))  # one row per ref; the text is merged across them
-        ws.merge_cells(f"B{r}:G{r + k - 1}")
-        c = ws.cell(r, 2, text)
-        c.font = _font()
-        c.alignment = top_left
-        for n, fid in enumerate(refs):
-            rc = ws.cell(r + n, 8, fid)
-            rc.font = _font()
-            rc.alignment = top_left
-            if fid in row_by_id:
-                rc.hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
-                rc.font = _link_font()
-        for rr in range(r, r + k):
-            ws.row_dimensions[rr].height = max(15, 15 * _text_lines(text, 95) / k)
-        for col in range(2, 9):
-            ws.cell(r + k - 1, col).border = line
-        r += k
+        r = _put_action_rows(ws, r, text, text, _refs_in_text(clean, result), row_by_id)
 
     if r == 5:
         ws.merge_cells("B5:H5")
@@ -261,6 +241,65 @@ def _build_priority_actions(wb: Workbook, result: AnalysisResult):
         c.alignment = top_left
         for col in range(2, 9):
             ws.cell(5, col).border = line
+        r = 6
+
+    # Risks that add up: findings that are best handled together
+    if result.cross_references:
+        r += 1
+        c = ws.cell(r, 2, "Risks that add up")
+        c.font = _font(bold=True, size=12, color=xs.NAVY)
+        ws.row_dimensions[r].height = 20
+        r += 1
+        for xr in result.cross_references:
+            value, text = _risk_text(xr)
+            refs = list(dict.fromkeys(fid for fid in xr.related_findings if fid in row_by_id))
+            r = _put_action_rows(ws, r, value, text, refs, row_by_id)
+
+
+def _put_action_rows(ws, r, value, height_text, refs, row_by_id) -> int:
+    """Text merged across B..G, one linked finding ref per row in column H, a grey line below.
+
+    One row per ref (at least one); returns the next free row.
+    """
+    top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    k = max(1, len(refs))
+    ws.merge_cells(f"B{r}:G{r + k - 1}")
+    c = ws.cell(r, 2, value)
+    c.font = _font()
+    c.alignment = top_left
+    for n, fid in enumerate(refs):
+        rc = ws.cell(r + n, 8, fid)
+        rc.font = _font()
+        rc.alignment = top_left
+        if fid in row_by_id:
+            rc.hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
+            rc.font = _link_font()
+    for rr in range(r, r + k):
+        ws.row_dimensions[rr].height = max(15, 15 * _text_lines(height_text, 95) / k)
+    for col in range(2, 9):
+        ws.cell(r + k - 1, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+    return r + k
+
+
+def _risk_text(xr: CrossReference):
+    """Cell value (rich text when available) and plain text for one linked risk: title, why, what to do."""
+    parts = [("", xr.title, True)]
+    why = " ".join(t.strip() for t in (xr.correlation_description, xr.combined_impact) if t.strip())
+    if why:
+        parts.append(("Why it matters together: ", why, False))
+    if xr.recommended_action.strip():
+        parts.append(("What to do: ", xr.recommended_action.strip(), False))
+    text = "\n".join(label + body for label, body, _ in parts)
+    if not xs.RICH:
+        return text, text
+    blocks = []
+    for n, (label, body, bold) in enumerate(parts):
+        if n:
+            blocks.append(TextBlock(xs._inline(xs.TEXT), "\n"))
+        if label:
+            blocks.append(TextBlock(xs._inline(xs.TEXT, bold=True), label))
+        blocks.append(TextBlock(xs._inline(xs.TEXT, bold=bold), body))
+    return CellRichText(*blocks), text
 
 
 _SEV_RANK = {sev: i for i, sev in enumerate(_SEV_ORDER)}
@@ -632,29 +671,6 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
     _set_widths(ws, 1, 3)
     return True
 
-def _build_linked_issues(wb: Workbook, xrefs: list[CrossReference], analyses: list[DomainAnalysis]):
-    """Findings that belong together, with their titles instead of bare reference numbers."""
-    ws = wb.create_sheet(_LINKED)
-    _apply_app_style(ws)
-
-    titles = {f.id: f.title for da in analyses for f in da.findings}
-    COLS = ["Title", "Related findings", "How they connect", "Combined impact", "Recommended action"]
-    _hdr_row(ws, 1, COLS)
-    ws.freeze_panes = "A2"
-
-    for i, xr in enumerate(xrefs):
-        r = 2 + i
-        related = "\n".join(f"{fid} {titles[fid]}" if fid in titles else fid
-                            for fid in xr.related_findings)
-        vals = [xr.title, related, xr.correlation_description, xr.combined_impact,
-                xr.recommended_action]
-        for col, val in enumerate(vals, 1):
-            ws.cell(row=r, column=col, value=val).font = _font()
-
-    xs.apply_table_style(ws, header=1, last_row=1 + len(xrefs), last_col=len(COLS))
-    _set_widths(ws, 1, len(COLS))
-
-
 def _build_document_structure(wb: Workbook, tree: dict):
     ws = wb.create_sheet("Document Structure")
     _apply_app_style(ws)
@@ -750,7 +766,6 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         _SAP_VS_US if result.reconciliation else "",
         "No Issues Found" if _has_healthy_sections(result) else "",
         _HEATMAP if vd.heatmap_rows(result) else "",
-        _LINKED if result.cross_references else "",
     })
     _build_priority_actions(wb, result)
     _build_all_findings(wb, result)
@@ -759,8 +774,6 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     if result.coverage:
         _build_verified_healthy(wb, result)
     _build_risk_heatmap(wb, result)
-    if result.cross_references:
-        _build_linked_issues(wb, result.cross_references, result.domain_analyses)
     if tree:
         _build_document_structure(wb, tree)
     _build_token_usage(wb, result.token_usage)
