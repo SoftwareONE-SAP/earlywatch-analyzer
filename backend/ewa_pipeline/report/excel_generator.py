@@ -8,6 +8,9 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference, Series
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -247,10 +250,21 @@ def _add_bar_chart(ws, anchor_row: int, series: list[tuple[str, Reference, str]]
     chart.overlap = 100
     chart.width = _CHART_WIDTH_CM
     chart.height = height_cm
-    chart.legend.position = "b"
+    # Legend on top so it cannot sit on the axis numbers.
+    chart.legend.position = "t"
+    chart.legend.overlay = False
+    # Square frame with no border line (Excel defaults to a rounded, grey one).
+    chart.roundedCorners = False
+    chart.graphical_properties = GraphicalProperties(ln=LineProperties(noFill=True))
     # openpyxl 3.1 hides the axes unless told otherwise.
     chart.x_axis.delete = False
     chart.y_axis.delete = False
+    # Thin light-grey gridlines instead of Excel's heavy default.
+    chart.y_axis.majorGridlines.spPr = GraphicalProperties(
+        ln=LineProperties(solidFill=xs.ROW_LINE, w=6350))
+    # Show the count on each segment (also on the 100% chart); blank out zeros.
+    chart.dataLabels = DataLabelList(showVal=True, showSerName=False, showCatName=False,
+                                     showLegendKey=False, showPercent=False, numFmt="0;;;")
     for title, values, colour in series:
         s = Series(values, title=title)
         s.graphicalProperties.solidFill = colour
@@ -258,6 +272,9 @@ def _add_bar_chart(ws, anchor_row: int, series: list[tuple[str, Reference, str]]
         chart.series.append(s)
     if categories is not None:
         chart.set_categories(categories)
+    else:
+        # No categories: Excel would label the single bar "1", so drop the whole axis.
+        chart.x_axis.delete = True
     ws.add_chart(chart, f"B{anchor_row}")
     return math.ceil(height_cm / _ROW_CM) + 1
 

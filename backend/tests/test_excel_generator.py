@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -642,6 +643,28 @@ class ExecutiveSummaryChartTests(unittest.TestCase):
         self.assertLess(sev_row + 7, self._find(ws, "Top 3 fixes (suggested order)"))
         sap_row = ws._charts[1].anchor._from.row + 1
         self.assertLess(sap_row + 11, self._find(ws, "Top 5 priority actions"))
+
+    def test_chart_layout_is_tidy(self):
+        from ewa_pipeline.report import excel_style as xs
+        ws = self._book(self._with_sap())["Executive Summary"]
+        for chart in ws._charts:
+            self.assertEqual(chart.legend.position, "t")
+            self.assertFalse(chart.legend.overlay)
+            self.assertTrue(chart.dataLabels.showVal)
+            self.assertFalse(chart.dataLabels.showSerName)
+            self.assertFalse(chart.dataLabels.showCatName)
+            self.assertFalse(chart.dataLabels.showPercent)
+            self.assertEqual(chart.y_axis.majorGridlines.spPr.ln.solidFill.srgbClr, xs.ROW_LINE)
+        # The reader drops roundedCorners, so check the saved chart XML itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(self._with_sap(), path)
+            with zipfile.ZipFile(path) as z:
+                for name in (n for n in z.namelist() if n.startswith("xl/charts/chart")):
+                    self.assertIn('<roundedCorners val="0"', z.read(name).decode("utf-8"))
+        # Severity chart has no categories: its category axis is hidden; the SAP chart keeps them.
+        self.assertTrue(ws._charts[0].x_axis.delete)
+        self.assertFalse(ws._charts[1].x_axis.delete)
 
     def test_no_reconciliation_one_chart(self):
         ws = self._book(self._result())["Executive Summary"]
