@@ -46,18 +46,6 @@ def _check(sid: str, rating: str) -> ReconciliationRow:
     return ReconciliationRow(source="Check", sap_rating=rating, our_section_id=sid)
 
 
-class SeverityTotalsTests(unittest.TestCase):
-    def test_always_four_keys(self):
-        self.assertEqual(vd.severity_totals(_result([])),
-                         {"Critical": 0, "High": 0, "Medium": 0, "Low": 0})
-
-    def test_counts(self):
-        res = _result([_da("1", "A", [_finding("F1", "High"), _finding("F2", "High")]),
-                       _da("2", "B", [_finding("F3", "Low")])])
-        self.assertEqual(vd.severity_totals(res),
-                         {"Critical": 0, "High": 2, "Medium": 0, "Low": 1})
-
-
 class SapPartsTests(unittest.TestCase):
     def test_worst_rating_wins_and_empty_ids_skipped(self):
         rows = [_check("1", "GREEN"), _check("1", "RED"), _check("1", "YELLOW"),
@@ -68,28 +56,6 @@ class SapPartsTests(unittest.TestCase):
     def test_no_reconciliation_gives_empty_parts(self):
         self.assertEqual(vd.sap_rating_by_section([]), {})
         self.assertEqual(vd.sap_result_counts([], []), [])
-
-
-class TopFixesTests(unittest.TestCase):
-    def test_severity_then_effort_then_order(self):
-        res = _result([
-            _da("1", "A", [_finding("F1", "High", "Low"), _finding("F2", "Critical", "High")]),
-            _da("2", "B", [_finding("F3", "Critical", "Low"), _finding("F4", "Critical", "Low")]),
-        ])
-        got = [t.finding.id for t in vd.top_fixes(res, n=4)]
-        self.assertEqual(got, ["F3", "F4", "F2", "F1"])
-
-    def test_ties_keep_section_then_finding_order(self):
-        res = _result([_da("1", "A", [_finding("F1"), _finding("F2")]),
-                       _da("2", "B", [_finding("F3")])])
-        got = vd.top_fixes(res, n=3)
-        self.assertEqual([t.finding.id for t in got], ["F1", "F2", "F3"])
-        self.assertEqual([t.row for t in got], [3, 4, 3])
-        self.assertEqual(got[2].section_id, "2")
-
-    def test_limit(self):
-        res = _result([_da("1", "A", [_finding(f"F{i}") for i in range(5)])])
-        self.assertEqual(len(vd.top_fixes(res)), 3)
 
 
 class ChapterTests(unittest.TestCase):
@@ -141,7 +107,7 @@ class HeatmapTests(unittest.TestCase):
         ])
         rows = vd.heatmap_rows(res)
         self.assertEqual(sum(r.findings for r in rows),
-                         sum(vd.severity_totals(res).values()))
+                         sum(len(da.findings) for da in res.domain_analyses))
         self.assertEqual([r.section_id for r in rows], ["1", "2"])
 
     def test_not_tagged_only_when_needed(self):
@@ -186,7 +152,7 @@ class RealSampleTests(unittest.TestCase):
                 continue
             res = AnalysisResult.model_validate_json(path.read_text(encoding="utf-8"))
             rows = vd.heatmap_rows(res)
-            self.assertEqual(sum(r.findings for r in rows), sum(vd.severity_totals(res).values()))
+            self.assertEqual(sum(r.findings for r in rows), sum(len(da.findings) for da in res.domain_analyses))
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ from ewa_pipeline.report.schemas import (
 
 SEVERITIES = ["Critical", "High", "Medium", "Low"]
 _SEV_RANK = {sev: i for i, sev in enumerate(SEVERITIES)}
-_EFFORT_RANK = {"Low": 0, "Medium": 1, "High": 2}
 
 RATING_ORDER = {"RED": 0, "YELLOW": 1, "GREEN": 2}
 
@@ -30,16 +29,6 @@ RESULT_ORDER = [rd.RESULT_AGREE, rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK
                 rd.RESULT_NO_RATING]
 
 Chapter = tuple[int | None, str]
-
-
-def severity_totals(result: AnalysisResult) -> dict[str, int]:
-    """Findings per severity. Always has all four keys."""
-    totals = {sev: 0 for sev in SEVERITIES}
-    for da in result.domain_analyses:
-        for f in da.findings:
-            if f.severity in totals:
-                totals[f.severity] += 1
-    return totals
 
 
 def sap_result_counts(rows: list[ReconciliationRow],
@@ -70,27 +59,6 @@ def sap_rating_by_section(reconciliation: list[ReconciliationRow]) -> dict[str, 
         if best is None or RATING_ORDER[row.sap_rating] < RATING_ORDER[best]:
             sap_rating[row.our_section_id] = row.sap_rating
     return sap_rating
-
-
-@dataclass
-class TopFix:
-    finding: Finding
-    section_id: str
-    section_title: str
-    row: int  # row of the finding on its section tab (3 = first finding), for links
-
-
-def top_fixes(result: AnalysisResult, n: int = 3) -> list[TopFix]:
-    """The n findings to fix first: severity, then effort (Low first), then document order."""
-    ranked = []
-    for sec_idx, da in enumerate(result.domain_analyses):
-        for f_idx, f in enumerate(da.findings):
-            key = (_SEV_RANK.get(f.severity, len(SEVERITIES)),
-                   _EFFORT_RANK.get(f.remediation.effort_estimate, len(_EFFORT_RANK)),
-                   sec_idx, f_idx)
-            ranked.append((key, TopFix(f, da.section_id, da.section_title, 3 + f_idx)))
-    ranked.sort(key=lambda t: t[0])
-    return [fix for _key, fix in ranked[:n]]
 
 
 def chapter_of(result: AnalysisResult) -> dict[str, Chapter]:
