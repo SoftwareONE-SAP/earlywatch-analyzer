@@ -34,6 +34,18 @@ EMPTY_DOT = "BFBFBF"
 
 RATING_COLOURS = {"RED": "C00000", "YELLOW": "E0A000", "GREEN": "548235"}
 SEVERITY_COLOURS = {"Critical": "C00000", "High": "E46C0A", "Medium": "E0A000", "Low": "4F81BD"}
+# Chart colours for the SAP-vs-us result labels (same text as visual_data.RESULT_ORDER).
+RESULT_COLOURS = {
+    "Agree": "548235",
+    "We rate it more serious": "E46C0A",
+    "We rate it less serious": "4F81BD",
+    "Please check": "E0A000",
+    "Not found in our analysis": "C00000",
+    "Section not analysed": "808080",
+    "No detail to compare": "BFBFBF",
+    "SAP gave no rating": "D9D9D9",
+}
+RESULT_DEFAULT_COLOUR = "BFBFBF"
 SURE_LEVELS = {"High": 3, "Medium": 2, "Low": 1}
 
 DOT = "●"        # filled circle

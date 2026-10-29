@@ -589,5 +589,71 @@ class ExecutiveSummaryDecisionBlockTests(unittest.TestCase):
         self.assertEqual(ws.cell(last + 1, 3).value, "Worst severity")
 
 
+class ExecutiveSummaryChartTests(unittest.TestCase):
+    _book = ExecutiveSummaryDecisionBlockTests._book
+    _result = ExecutiveSummaryDecisionBlockTests._result
+    _find = ExecutiveSummaryDecisionBlockTests._find
+
+    def _with_sap(self):
+        result = self._result()
+        result.reconciliation = [
+            _row("Alert", "Agree", sap_item="A", sap_rating="RED", our_rating="RED"),
+            _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
+            _row("Alert", "Not covered", sap_item="Odd", sap_rating="YELLOW"),
+        ]
+        return result
+
+    def _sap_rows(self, ws):
+        hdr = self._find(ws, "SAP vs SoftwareONE") + 1
+        n = 0
+        while ws.cell(hdr + 1 + n, 4).value is not None:
+            n += 1
+        return hdr, n
+
+    def _colours(self, chart):
+        return [s.graphicalProperties.solidFill.srgbClr for s in chart.series]
+
+    def test_full_result_has_two_charts(self):
+        ws = self._book(self._with_sap())["Executive Summary"]
+        self.assertEqual(len(ws._charts), 2)
+
+    def test_severity_chart(self):
+        from ewa_pipeline.report import excel_style as xs
+        ws = self._book(self._with_sap())["Executive Summary"]
+        chart = ws._charts[0]
+        self.assertEqual(chart.grouping, "percentStacked")
+        self.assertEqual(len(chart.series), 4)
+        self.assertEqual(self._colours(chart), [xs.SEVERITY_COLOURS[s] for s in
+                                                ("Critical", "High", "Medium", "Low")])
+
+    def test_sap_chart(self):
+        from ewa_pipeline.report import excel_style as xs
+        ws = self._book(self._with_sap())["Executive Summary"]
+        chart = ws._charts[1]
+        _hdr, n = self._sap_rows(ws)
+        self.assertEqual(chart.grouping, "stacked")
+        self.assertEqual(len(chart.series), n)
+        want = [xs.RESULT_COLOURS[ws.cell(_hdr + 1 + i, 2).value] for i in range(n)]
+        self.assertEqual(self._colours(chart), want)
+
+    def test_charts_do_not_cover_next_block(self):
+        ws = self._book(self._with_sap())["Executive Summary"]
+        sev_row = ws._charts[0].anchor._from.row + 1
+        self.assertLess(sev_row + 7, self._find(ws, "Top 3 fixes (suggested order)"))
+        sap_row = ws._charts[1].anchor._from.row + 1
+        self.assertLess(sap_row + 11, self._find(ws, "Top 5 priority actions"))
+
+    def test_no_reconciliation_one_chart(self):
+        ws = self._book(self._result())["Executive Summary"]
+        self.assertEqual(len(ws._charts), 1)
+
+    def test_no_findings_no_reconciliation_no_charts(self):
+        result = build_result()
+        for da in result.domain_analyses:
+            da.findings = []
+        ws = self._book(result)["Executive Summary"]
+        self.assertEqual(len(ws._charts), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
