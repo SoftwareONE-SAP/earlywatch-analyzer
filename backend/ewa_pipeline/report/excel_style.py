@@ -40,13 +40,11 @@ DOT = "●"        # filled circle
 EMPTY = "○"      # empty circle
 DASH = "—"       # em dash
 
-# Tabs that get the navy colour (the five front tabs).
+# Tabs that get the navy colour (all four tabs of the workbook).
 FRONT_TABS = (
-    "How to read this workbook",
     "Priority Actions",
     "Findings",
     "SAP vs SoftwareONE",
-    "No Issues Found",
     "Risk Heatmap",
 )
 

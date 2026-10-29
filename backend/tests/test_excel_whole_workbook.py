@@ -157,5 +157,32 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                     self.assertIn(self.wb["Findings"][f"A{m.group(3)}"].value, finding_ids, where)
 
 
+class ExactTabListTests(unittest.TestCase):
+    def _names(self, result):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(result, path)
+            wb = load_workbook(path)
+        self.assertEqual([ws.title for ws in wb.worksheets if ws.sheet_state != "visible"], [])
+        self.assertEqual(wb.active.title, "Priority Actions")
+        return wb.sheetnames
+
+    def test_full_sample_has_exactly_four_tabs(self):
+        self.assertEqual(self._names(full_result()),
+                         ["Priority Actions", "Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
+
+    def test_no_sap_data_means_no_sap_vs_softwareone_tab(self):
+        result = full_result()
+        result.reconciliation = []
+        self.assertEqual(self._names(result), ["Priority Actions", "Findings", "Risk Heatmap"])
+
+    def test_no_findings_and_no_sap_data_leaves_two_tabs(self):
+        result = full_result()
+        result.reconciliation = []
+        for da in result.domain_analyses:
+            da.findings = []
+        self.assertEqual(self._names(result), ["Priority Actions", "Findings"])
+
+
 if __name__ == "__main__":
     unittest.main()

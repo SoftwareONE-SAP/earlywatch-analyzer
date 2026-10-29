@@ -16,17 +16,12 @@ from ewa_pipeline.report import visual_data as vd
 from ewa_pipeline.report.schemas import (
     AnalysisResult, CrossReference, DomainAnalysis, Finding,
 )
-from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-
-_SZ     = 11          # body size
 
 _C_LINK     = xs.LINK
 
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
-
-_NUM = '#,##0'
 
 # ── Style helpers ─────────────────────────────────────────────────────────────
 
@@ -70,10 +65,9 @@ _WIDTHS = {
     "Reviewer note: why check first": 50, "Reviewer note: search query": 50,
     "SAP list": 11, "SAP topic": 24, "What SAP says": 40, "SAP rating": 14,
     "SoftwareONE rating": 18, "Our finding": 36, "Result": 26, "Explanation": 55,
-    "Report section": 30, "Note": 45, 
+    "Report section": 30,
     "Reviewer note: refs": 18, "Reviewer note: score": 14, "Reviewer note: matched by": 20,
     "Reviewer note: original note": 55,
-    "Related findings": 45, "How they connect": 55, "Combined impact": 50,
 }
 
 def _set_widths(ws, header_row, ncols):
@@ -642,7 +636,7 @@ def _healthy_sections(result: AnalysisResult) -> list:
 
 # ── Final pass over every tab ─────────────────────────────────────────────────
 
-# The five front tabs get the navy tab colour; every other tab has none.
+# The four tabs get the navy tab colour.
 _FRONT_TABS = set(xs.FRONT_TABS)
 
 def _finish_sheets(wb: Workbook) -> None:
