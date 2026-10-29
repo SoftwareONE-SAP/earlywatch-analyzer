@@ -419,6 +419,68 @@ def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
     _collapse_group(ws, 15, 16)
 
 
+_SEV_RANK = {sev: i for i, sev in enumerate(_SEV_ORDER)}
+
+
+def _findings_in_order(result: AnalysisResult) -> list[tuple[DomainAnalysis, Finding]]:
+    """Every (section, finding) pair, worst severity first, then section order, then finding order."""
+    rows: list[tuple] = []
+    for sec_idx, da in enumerate(result.domain_analyses):
+        for f_idx, f in enumerate(da.findings):
+            rows.append((_SEV_RANK.get(f.severity, 9), sec_idx, f_idx, da, f))
+    rows.sort(key=lambda x: x[:3])
+    return [(da, f) for *_, da, f in rows]
+
+
+def _finding_rows(result: AnalysisResult) -> tuple[dict[str, int], dict[str, int]]:
+    """Row on the Findings tab for each finding id, and for the first finding of each section.
+
+    Data starts at row 2. A repeated id keeps its first row.
+    """
+    row_by_id: dict[str, int] = {}
+    first_row_by_section: dict[str, int] = {}
+    for i, (da, f) in enumerate(_findings_in_order(result)):
+        row_by_id.setdefault(f.id, 2 + i)
+        first_row_by_section.setdefault(da.section_id, 2 + i)
+    return row_by_id, first_row_by_section
+
+
+def _refs_in_text(text, result: AnalysisResult) -> list[str]:
+    """Finding ids mentioned in a text, in order of appearance, each once.
+
+    "A-F001 – A-F003" (two ids of one section joined only by a dash) also brings in the
+    findings between them. Anything that is not a real finding id is ignored.
+    """
+    position: dict[str, tuple[int, int]] = {}  # id -> (section index, finding index), first one wins
+    for sec_idx, da in enumerate(result.domain_analyses):
+        for f_idx, f in enumerate(da.findings):
+            position.setdefault(f.id, (sec_idx, f_idx))
+    if not position:
+        return []
+
+    text = str(text)
+    ids = sorted(position, key=len, reverse=True)  # longest first, so a short id never cuts a long one
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(i) for i in ids) + r")(?!\w)")
+    matches = list(pattern.finditer(text))
+
+    found: list[str] = []
+
+    def add(fid):
+        if fid not in found:
+            found.append(fid)
+
+    for n, m in enumerate(matches):
+        add(m.group())
+        nxt = matches[n + 1] if n + 1 < len(matches) else None
+        if nxt is None or text[m.end():nxt.start()].strip() not in ("–", "—", "-"):
+            continue
+        (sec_a, idx_a), (sec_b, idx_b) = position[m.group()], position[nxt.group()]
+        if sec_a == sec_b and idx_a < idx_b:
+            for f in result.domain_analyses[sec_a].findings[idx_a + 1:idx_b]:
+                add(f.id)
+    return found
+
+
 def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     """One flat, filterable table of every finding, worst first."""
     ws = wb.create_sheet("All Findings")
@@ -434,14 +496,9 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     _hdr_row(ws, 1, COLS)
     ws.freeze_panes = "A2"
 
-    _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-    rows: list[tuple] = []
-    for sec_idx, da in enumerate(result.domain_analyses):
-        for f_idx, f in enumerate(da.findings):
-            rows.append((_SEV_ORDER.get(f.severity, 9), sec_idx, f_idx, da, f))
-    rows.sort(key=lambda x: (x[0], x[1], x[2]))
+    rows = _findings_in_order(result)
 
-    for i, (_, _, f_idx, da, f) in enumerate(rows):
+    for i, (da, f) in enumerate(rows):
         r = 2 + i
         vals = [
             f.id, da.section_title, xs.severity_text(f.severity), ", ".join(f.risk_types), f.title,
@@ -459,9 +516,10 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
 
     # Ref. links to the finding's row on its section sheet (after styling, which resets fonts only on borders).
-    for i, (_, _, f_idx, da, f) in enumerate(rows):
+    for i, (da, f) in enumerate(rows):
         sname = sheet_map.get(da.section_id)
         if sname:
+            f_idx = next(n for n, x in enumerate(da.findings) if x is f)
             idc = ws.cell(row=2 + i, column=1)
             idc.hyperlink = f"#'{sname}'!A{3 + f_idx}"
             idc.font = _link_font()

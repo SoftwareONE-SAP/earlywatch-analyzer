@@ -1,6 +1,7 @@
 """Whole-workbook checks for the polished minimal look: navy frame only, one font, plain view."""
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import unittest
@@ -141,6 +142,19 @@ class WholeWorkbookStyleTests(unittest.TestCase):
             self.assertEqual(ws.page_setup.orientation, "landscape", ws.title)
             self.assertEqual(int(ws.page_setup.paperSize), 9, ws.title)
             self.assertEqual(ws.page_setup.fitToWidth, 1, ws.title)
+
+    def test_every_internal_link_lands_on_an_existing_sheet_and_row(self):
+        for ws in self.wb.worksheets:
+            for cell in ws._cells.values():
+                link = cell.hyperlink
+                target = (link.target or link.location or "") if link else ""
+                if not target.startswith("#"):
+                    continue
+                where = f"{ws.title}!{cell.coordinate}"
+                m = re.fullmatch(r"#'(.+)'!([A-Z]+)(\d+)", target)
+                self.assertIsNotNone(m, f"{where}: {target}")
+                self.assertIn(m.group(1), self.wb.sheetnames, where)
+                self.assertLessEqual(int(m.group(3)), self.wb[m.group(1)].max_row, where)
 
 
 if __name__ == "__main__":

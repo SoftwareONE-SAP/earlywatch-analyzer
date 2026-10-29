@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from ewa_pipeline.report.excel_generator import generate
+from ewa_pipeline.report.excel_generator import _finding_rows, _refs_in_text, generate
 from ewa_pipeline.report.schemas import (
     AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow, Remediation, SectionCoverage,
     SystemProfile,
@@ -221,6 +221,68 @@ class ExcelGeneratorTests(unittest.TestCase):
         self.assertEqual(names[:3], ["How to read this workbook", "Executive Summary", "All Findings"])
         self.assertLess(names.index("Performance Indicators"), names.index("Action Plan"))
         self.assertLess(names.index("Action Plan"), names.index("Token Usage"))
+
+
+def _finding(fid: str, severity: str) -> Finding:
+    return Finding(
+        id=fid, title=f"Finding {fid}", severity=severity,
+        description="d", evidence="e", impact="i", remediation=_remediation("Fix."),
+    )
+
+
+class FindingRowsTests(unittest.TestCase):
+    def test_rows_follow_severity_order_and_start_at_two(self):
+        row_by_id, first_by_section = _finding_rows(build_result())
+        self.assertEqual(row_by_id, {"F-002": 2, "F-001": 3})  # Critical before Medium
+        self.assertEqual(first_by_section, {"2": 2, "1": 3})
+
+    def test_duplicate_id_keeps_first_row(self):
+        result = build_result()
+        result.domain_analyses[0].findings.append(new_style_finding())  # a second F-002, in section 1
+        row_by_id, _ = _finding_rows(result)
+        self.assertEqual(row_by_id["F-002"], 2)
+
+
+class RefsInTextTests(unittest.TestCase):
+    def _result(self, ids_by_section):
+        result = build_result()
+        result.domain_analyses = [
+            DomainAnalysis(section_title=f"S{i}", section_id=str(i), overall_health="Warning",
+                           findings=[_finding(fid, "High") for fid in ids])
+            for i, ids in enumerate(ids_by_section, 1)]
+        return result
+
+    def test_plain_ids_in_order_of_appearance(self):
+        result = self._result([["0052-F001", "0052-F002"], ["0053-F001"]])
+        text = "Fix 0053-F001 first, then 0052-F001."
+        self.assertEqual(_refs_in_text(text, result), ["0053-F001", "0052-F001"])
+
+    def test_range_with_en_dash_brings_in_the_findings_between(self):
+        result = self._result([["0015-F001", "0015-F002", "0015-F003", "0015-F004"]])
+        self.assertEqual(_refs_in_text("See 0015-F001–0015-F003 for details.", result),
+                         ["0015-F001", "0015-F002", "0015-F003"])
+        self.assertEqual(_refs_in_text("0015-F001-0015-F003", result),
+                         ["0015-F001", "0015-F002", "0015-F003"])
+
+    def test_range_across_sections_is_not_filled_in(self):
+        result = self._result([["A-F001", "A-F002"], ["B-F001"]])
+        self.assertEqual(_refs_in_text("A-F001 – B-F001", result), ["A-F001", "B-F001"])
+
+    def test_unknown_ids_are_skipped_and_partial_words_do_not_match(self):
+        result = self._result([["0052-F001"]])
+        self.assertEqual(_refs_in_text("0099-F001 and 0052-F001 and 0052-F0011", result), ["0052-F001"])
+
+    def test_f_dash_style_ids(self):
+        self.assertEqual(_refs_in_text("Tune F-002, then upgrade (F-001).", build_result()), ["F-002", "F-001"])
+
+    def test_no_repeats(self):
+        self.assertEqual(_refs_in_text("F-002, F-001 and F-002 again", build_result()), ["F-002", "F-001"])
+
+    def test_no_findings_gives_nothing(self):
+        result = build_result()
+        for da in result.domain_analyses:
+            da.findings = []
+        self.assertEqual(_refs_in_text("F-001", result), [])
 
 
 def _row(source, verdict, **kw) -> ReconciliationRow:
@@ -461,13 +523,6 @@ class ExecutiveSummaryStyleTests(unittest.TestCase):
                 if cell.row in navy_rows:
                     continue
                 self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
-
-
-def _finding(fid: str, severity: str) -> Finding:
-    return Finding(
-        id=fid, title=f"Finding {fid}", severity=severity,
-        description="d", evidence="e", impact="i", remediation=_remediation("Fix."),
-    )
 
 
 class WorstSeverityTests(unittest.TestCase):
