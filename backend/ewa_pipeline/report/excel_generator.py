@@ -14,7 +14,7 @@ from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report import reconciliation_display as rd
 from ewa_pipeline.report import visual_data as vd
 from ewa_pipeline.report.schemas import (
-    AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow,
+    AnalysisResult, CrossReference, DomainAnalysis, Finding,
 )
 from ewa_pipeline.tracking.token_tracker import TokenUsage
 
@@ -526,18 +526,17 @@ _SAP_VS_US = "SAP vs SoftwareONE"
 _BOLD_RESULTS = {rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK}
 
 
-def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str],
-                     analyses: list[DomainAnalysis]):
+def _build_sap_vs_us(wb: Workbook, result: AnalysisResult):
     """SAP's own ratings next to ours: result counts on top, one row per alert/check below."""
+    rows, analyses = result.reconciliation, result.domain_analyses
     ws = wb.create_sheet(_SAP_VS_US)
     _apply_app_style(ws)
 
     findings_by_id: dict = {}
-    finding_row: dict[str, tuple[str, int]] = {}  # finding id -> (section id, row on its sheet)
     for da in analyses:
-        for i, f in enumerate(da.findings):
+        for f in da.findings:
             findings_by_id.setdefault(f.id, f)
-            finding_row.setdefault(f.id, (da.section_id, 3 + i))
+    row_by_id, _ = _finding_rows(result)
     displays = [rd.describe(row, findings_by_id) for row in rows]
 
     ws.cell(1, 1, _SAP_VS_US).font = _font(bold=True, size=16)
@@ -589,18 +588,13 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     last = max(hdr, hdr + len(rows))
     xs.apply_table_style(ws, header=hdr, last_row=last, last_col=len(COLS))
 
-    # Links (after styling): finding -> its row on the section tab, section -> top of its tab.
+    # Link (after styling): our finding -> its row on the Findings tab.
     for i, row in enumerate(rows):
         r = hdr + 1 + i
         fid = row.finding_ids[0] if row.finding_ids else None
-        target = finding_row.get(fid) if fid else None
-        if target and sheet_map.get(target[0]) and ws.cell(r, 6).value:
-            ws.cell(r, 6).hyperlink = f"#'{sheet_map[target[0]]}'!A{target[1]}"
+        if fid in row_by_id and ws.cell(r, 6).value:
+            ws.cell(r, 6).hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
             ws.cell(r, 6).font = _link_font()
-        sname = sheet_map.get(row.our_section_id)
-        if sname and row.our_section_title:
-            ws.cell(r, 10).hyperlink = f"#'{sname}'!A1"
-            ws.cell(r, 10).font = _link_font()
 
     _set_widths(ws, hdr, len(COLS))
     _collapse_group(ws, 11, 14)
@@ -640,7 +634,7 @@ def _add_cells(total: dict, cells: dict) -> None:
         total[rt] = (old_count + count, _worst_of([old_worst, worst]))
 
 
-def _build_risk_heatmap(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]) -> bool:
+def _build_risk_heatmap(wb: Workbook, result: AnalysisResult) -> bool:
     """Sections down, risk types across. Number = findings, colour = most serious one.
 
     Returns False (no sheet) when there is nothing to show.
@@ -650,6 +644,7 @@ def _build_risk_heatmap(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
         return False
     types = vd.heatmap_columns(result)
     with_sap = bool(result.reconciliation)
+    _, first_row_by_section = _finding_rows(result)
 
     ws = wb.create_sheet(_HEATMAP)
     _apply_app_style(ws)
@@ -699,7 +694,7 @@ def _build_risk_heatmap(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
         layout = [("section", row) for row in rows]
 
     r = 3
-    links: list[tuple[int, str]] = []
+    links: list[tuple[int, int]] = []  # (heatmap row, row on the Findings tab)
     for kind, item in layout:
         r += 1
         if kind == "chapter":
@@ -722,14 +717,14 @@ def _build_risk_heatmap(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
             ws.cell(r, 2, xs.rating_text(row.sap_rating)).font = _font()
         put_grid(r, row.cells, row.findings)
         finish_row(r)
-        if sheet_map.get(row.section_id):
-            links.append((r, sheet_map[row.section_id]))
+        if row.section_id in first_row_by_section:
+            links.append((r, first_row_by_section[row.section_id]))
         if grouped:
             ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
             ws.row_dimensions[r].outlineLevel = 1
             ws.row_dimensions[r].hidden = True
-    for rr, sname in links:
-        ws.cell(rr, 1).hyperlink = f"#'{sname}'!A1"
+    for rr, findings_row in links:
+        ws.cell(rr, 1).hyperlink = f"#'{_FINDINGS}'!A{findings_row}"
         ws.cell(rr, 1).font = _link_font()
 
     # Total row: distinct findings per type (a finding sits in one section, so section counts add up).
@@ -970,10 +965,10 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _build_executive_summary(wb, result, sheet_map)
     _build_all_findings(wb, result)
     if result.reconciliation:
-        _build_sap_vs_us(wb, result.reconciliation, sheet_map, result.domain_analyses)
+        _build_sap_vs_us(wb, result)
     if result.coverage:
         _build_verified_healthy(wb, result)
-    _build_risk_heatmap(wb, result, sheet_map)
+    _build_risk_heatmap(wb, result)
     for da in result.domain_analyses:
         if da.section_id in sheet_map:
             _build_section_sheet(wb, da, sheet_map[da.section_id])

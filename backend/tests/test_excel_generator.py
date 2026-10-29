@@ -341,7 +341,8 @@ class SapVsUsTests(unittest.TestCase):
         self.assertEqual(first["How sure we are"], "●●● High")
         self.assertEqual(first["Our finding"], "Kernel release out of maintenance (+1 more)")
         target = ws.cell(hdr_row + 1, headers.index("Our finding") + 1).hyperlink
-        self.assertEqual(target.target or target.location, "#'Software Configuration'!A3")
+        self.assertEqual(target.target or target.location, "#'Findings'!A3")  # Medium, after Critical F-002
+        self.assertIsNone(ws.cell(hdr_row + 1, headers.index("Report section") + 1).hyperlink)
         self.assertEqual(first["Reviewer note: refs"], "F-001, F-003")
         self.assertEqual(first["Reviewer note: score"], 0.97)
         self.assertEqual(first["Reviewer note: matched by"], "Decision-1")
@@ -661,6 +662,29 @@ class RiskHeatmapTests(unittest.TestCase):
         headers = [c.value for c in ws[3]]
         self.assertEqual(total[headers.index("Findings")].value, 26)
         self.assertEqual(total[headers.index("Security")].value, 26)
+
+    def test_section_row_links_to_its_first_finding_on_the_findings_tab(self):
+        ws = self._generate(build_result())["Risk Heatmap"]
+        link = ws.cell(self._find_row(ws, "Performance Indicators"), 1).hyperlink  # Critical: Findings row 2
+        self.assertEqual(link.target or link.location, "#'Findings'!A2")
+        link = ws.cell(self._find_row(ws, "Software Configuration"), 1).hyperlink  # Medium: Findings row 3
+        self.assertEqual(link.target or link.location, "#'Findings'!A3")
+
+    def test_chapter_rows_and_sections_without_findings_have_no_link(self):
+        result = self._many_sections(26)
+        result.coverage = [SectionCoverage(section_id="4", section_title="Database", status="analyzed")]
+        result.reconciliation = [_row("Check", "Not covered", sap_topic="Database", sap_rating="RED",
+                                      our_section_id="4")]
+        ws = self._generate(result)["Risk Heatmap"]
+        chapters = [r for r in range(4, ws.max_row + 1)
+                    if ws.row_dimensions[r].outlineLevel == 0 and ws.cell(r, 1).font.bold]
+        self.assertTrue(chapters)
+        for r in chapters:
+            self.assertIsNone(ws.cell(r, 1).hyperlink, r)
+        db = self._find_row(ws, "Database")
+        self.assertIsNone(ws.cell(db, 1).hyperlink)
+        linked = self._find_row(ws, "1.2 Part 1")
+        self.assertIsNotNone(ws.cell(linked, 1).hyperlink)
 
     def test_few_sections_are_not_grouped(self):
         ws = self._generate(self._many_sections(5))["Risk Heatmap"]

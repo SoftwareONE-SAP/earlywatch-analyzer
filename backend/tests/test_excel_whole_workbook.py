@@ -144,6 +144,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
             self.assertEqual(ws.page_setup.fitToWidth, 1, ws.title)
 
     def test_every_internal_link_lands_on_an_existing_sheet_and_row(self):
+        finding_ids = {f.id for da in full_result().domain_analyses for f in da.findings}
         for ws in self.wb.worksheets:
             for cell in ws._cells.values():
                 link = cell.hyperlink
@@ -155,6 +156,8 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                 self.assertIsNotNone(m, f"{where}: {target}")
                 self.assertIn(m.group(1), self.wb.sheetnames, where)
                 self.assertLessEqual(int(m.group(3)), self.wb[m.group(1)].max_row, where)
+                if m.group(1) == "Findings":  # a link into Findings lands on a finding's row
+                    self.assertIn(self.wb["Findings"][f"A{m.group(3)}"].value, finding_ids, where)
 
 
 if __name__ == "__main__":
