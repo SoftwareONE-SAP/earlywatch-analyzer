@@ -96,9 +96,9 @@ class ExcelGeneratorTests(unittest.TestCase):
 
     def test_findings_follows_priority_actions(self):
         names = self.wb.sheetnames
-        self.assertEqual(names[0], "How to read this workbook")
-        self.assertEqual(names[1], "Priority Actions")
-        self.assertEqual(names[2], "Findings")
+        self.assertEqual(names[0], "Priority Actions")
+        self.assertEqual(names[1], "Findings")
+        self.assertNotIn("How to read this workbook", names)
         self.assertIn("Token Usage", names)
         for gone in ("Software Configuration", "Performance Indicators", "Action Plan"):
             self.assertNotIn(gone, names)
@@ -168,21 +168,16 @@ class ExcelGeneratorTests(unittest.TestCase):
         names = load_workbook(path).sheetnames
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(names.count("Findings"), 1)
-        self.assertEqual(names[2], "Findings")
+        self.assertEqual(names[1], "Findings")
 
-    def test_how_to_read_is_first_and_active(self):
-        self.assertEqual(self.wb.active.title, "How to read this workbook")
+    def test_priority_actions_is_first_and_active(self):
+        self.assertEqual(self.wb.active.title, "Priority Actions")
         selected = [ws.title for ws in self.wb.worksheets if ws.sheet_view.tabSelected]
-        self.assertEqual(selected, ["How to read this workbook"])
-        ws = self.wb["How to read this workbook"]
-        self.assertEqual(ws.column_dimensions["A"].width, 100)
-        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-        for expected in ("● Critical", "● Red", "●●● High", "●○○ Low", "Reviewer note"):
-            self.assertIn(expected, text)
+        self.assertEqual(selected, ["Priority Actions"])
 
     def test_technical_tabs_are_hidden_and_the_rest_visible(self):
         self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
-        for name in ("How to read this workbook", "Priority Actions", "Findings"):
+        for name in ("Priority Actions", "Findings"):
             self.assertEqual(self.wb[name].sheet_state, "visible", name)
 
 
@@ -271,8 +266,7 @@ class SapVsUsTests(unittest.TestCase):
             _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
         ]
         wb = self._generate(result)
-        self.assertEqual(wb.sheetnames[:4],
-                         ["How to read this workbook", "Priority Actions", "Findings", "SAP vs SoftwareONE"])
+        self.assertEqual(wb.sheetnames[:3], ["Priority Actions", "Findings", "SAP vs SoftwareONE"])
         ws = wb["SAP vs SoftwareONE"]
 
         counts = {ws.cell(r, 1).value: (ws.cell(r, 4).value, ws.cell(r, 5).value, ws.cell(r, 6).value)
@@ -324,7 +318,7 @@ class SapVsUsTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:4], ["Findings", "SAP vs SoftwareONE"])
+        self.assertEqual(names[1:3], ["Findings", "SAP vs SoftwareONE"])
         self.assertNotIn("No Issues Found", names)
 
     def test_old_payload_has_no_sap_sheet(self):
@@ -366,8 +360,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                         self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
 
     def test_only_front_tabs_have_navy_tab_colour(self):
-        front = {"How to read this workbook", "Priority Actions", "Findings",
-                 "SAP vs SoftwareONE", "Risk Heatmap"}
+        front = {"Priority Actions", "Findings", "SAP vs SoftwareONE", "Risk Heatmap"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
             if ws.title in front:
@@ -568,6 +561,30 @@ class PriorityActionsTests(unittest.TestCase):
         self.assertIn("1 section could not be analysed.", texts)
         self.assertFalse(any(t.startswith("We checked") for t in texts))
 
+    def test_how_to_read_block_sits_below_the_other_content(self):
+        ws = self._sheet(build_result())
+        texts = self._texts(ws)
+        head = next(c for row in ws.iter_rows() for c in row if c.value == "How to read this workbook")
+        self.assertTrue(head.font.b)
+        self.assertGreater(head.row, next(c.row for row in ws.iter_rows() for c in row
+                                          if c.value == "1. Tune the statement."))
+        legend = " ".join(texts)
+        for expected in ("● Critical", "● Low", "●●● High", "●●○ Medium", "●○○ Low"):
+            self.assertIn(expected, legend)
+        findings_line = next(t for t in texts if t.startswith("Findings —"))
+        self.assertIn("Folded columns", findings_line)
+
+    def test_how_to_read_has_a_line_only_for_tabs_that_exist(self):
+        texts = " ".join(self._texts(self._sheet(build_result())))
+        self.assertNotIn("SAP vs SoftwareONE —", texts)  # no reconciliation rows in this result
+        self.assertIn("Risk Heatmap —", texts)
+        result = build_result()
+        result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
+        self.assertIn("SAP vs SoftwareONE —", " ".join(self._texts(self._sheet(result))))
+        for da in result.domain_analyses:
+            da.findings = []
+        self.assertNotIn("Risk Heatmap —", " ".join(self._texts(self._sheet(result))))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -695,4 +712,4 @@ class RiskHeatmapTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:5], ["Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
+        self.assertEqual(names[1:4], ["Findings", "SAP vs SoftwareONE", "Risk Heatmap"])

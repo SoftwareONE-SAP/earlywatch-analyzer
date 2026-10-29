@@ -62,7 +62,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
 
     def test_every_expected_tab_is_present(self):
         names = self.wb.sheetnames
-        for name in ("How to read this workbook", "Priority Actions", "Findings", "SAP vs SoftwareONE",
+        for name in ("Priority Actions", "Findings", "SAP vs SoftwareONE",
                      "Risk Heatmap", "Document Structure",
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
@@ -70,8 +70,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
     def _navy_rows(self, ws):
         """Title-band rows and table-header rows: the only rows allowed to have a fill."""
         rows = set()
-        if ws.title in ("How to read this workbook", "Priority Actions", "SAP vs SoftwareONE",
-                        "Risk Heatmap"):
+        if ws.title in ("Priority Actions", "SAP vs SoftwareONE", "Risk Heatmap"):
             rows.add(1)
         if ws.freeze_panes:
             rows.add(ws[ws.freeze_panes].row - 1)  # main table header

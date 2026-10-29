@@ -104,74 +104,8 @@ def _link_font():
 
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
-_HOW_TO_READ = "How to read this workbook"
 _FINDINGS = "Findings"
 _PRIORITY = "Priority Actions"
-
-
-def _build_how_to_read(wb: Workbook, tabs: set[str]):
-    """First tab: what each tab is for and what the dots mean. One wide wrapped column."""
-    ws = wb.create_sheet(_HOW_TO_READ)
-    _apply_app_style(ws)
-    ws.column_dimensions["A"].width = 100
-
-    lines: list = []  # (text or rich text, kind) with kind in title / note / head / body
-
-    def add(value, kind="body"):
-        lines.append((value, kind))
-
-    add(_HOW_TO_READ, "title")
-    add("A plain-English review of your SAP EarlyWatch Alert report, prepared by SoftwareONE. "
-        "Read this page first.", "note")
-    add("What each tab shows", "head")
-    add(f"{_PRIORITY} " + xs.DASH + " the overall health and the five most urgent actions, with links "
-        "to the findings they cover.")
-    add(f"{_FINDINGS} " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
-        "header row to filter or sort. More detail sits in the folded columns on the right.")
-    if _SAP_VS_US in tabs:
-        add(f"{_SAP_VS_US} " + xs.DASH + " SAP's own ratings next to ours, so you can see where we agree "
-            "and where a second look is worthwhile.")
-    if _HEATMAP in tabs:
-        add(f"{_HEATMAP} " + xs.DASH + " which report sections carry which kinds of risk, coloured by "
-            "the most serious finding.")
-
-    add("How serious is a finding?", "head")
-    add(xs.legend_line(xs.severity_text("Critical"), "needs attention straight away."))
-    add(xs.legend_line(xs.severity_text("High"), "should be fixed soon."))
-    add(xs.legend_line(xs.severity_text("Medium"), "plan a fix."))
-    add(xs.legend_line(xs.severity_text("Low"), "worth knowing; low urgency."))
-
-    add("SAP's own traffic lights", "head")
-    add(xs.legend_line(xs.rating_text("RED"), "SAP flags this as a problem."))
-    add(xs.legend_line(xs.rating_text("YELLOW"), "SAP flags this as a warning."))
-    add(xs.legend_line(xs.rating_text("GREEN"), "SAP sees no problem."))
-
-    add("How sure are we?", "head")
-    add(xs.legend_line(xs.sure_dots("High"), "the evidence is clear."))
-    add(xs.legend_line(xs.sure_dots("Medium"), "likely, but worth confirming."))
-    add(xs.legend_line(xs.sure_dots("Low"), "a rough match; please check by hand."))
-
-    add("Good to know", "head")
-    add("Columns called \"Reviewer note\" are folded away. Click the small + above the column letters to "
-        "open them.")
-    add("Some technical tabs are hidden. To see them in Excel, right-click any tab and choose Unhide.")
-    add("\"Check latest SAP guidance first?\" says Yes when the advice depends on current SAP Notes or "
-        "release information that you should look up before acting.")
-
-    for r, (value, kind) in enumerate(lines, 1):
-        c = ws.cell(r, 1, value)
-        if kind == "title":
-            xs.title_band(ws, r, 1, 1)
-        elif kind == "note":
-            c.font = _font(size=10, color=xs.NOTE)
-        elif kind == "head":
-            c.font = _font(bold=True)
-        else:
-            c.font = _font()
-        c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if kind == "head":
-            ws.row_dimensions[r].height = 30  # room above the heading
-            c.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
 
 
 _HEALTH_DOT = {"Critical": "C00000", "Warning": "E0A000", "Healthy": "548235"}
@@ -264,6 +198,38 @@ def _build_priority_actions(wb: Workbook, result: AnalysisResult):
             c.alignment = top_left
             ws.row_dimensions[r].height = max(15, 15 * _text_lines(text, 110))
             r += 1
+
+    _put_how_to_read(ws, r + 1, result)
+
+
+def _put_how_to_read(ws, r, result: AnalysisResult) -> None:
+    """Short guide at the bottom of the front tab: severity and dots legends, one line per other tab."""
+    top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    c = ws.cell(r, 2, "How to read this workbook")
+    c.font = _font(bold=True, size=12, color=xs.NAVY)
+    ws.row_dimensions[r].height = 20
+    r += 1
+
+    lines: list = [
+        _legend("How serious a finding is:  ", [xs.severity_text(sev) for sev in _SEV_ORDER]),
+        _legend("How sure we are:  ", [xs.sure_dots(level) for level in ("High", "Medium", "Low")]),
+        f"{_FINDINGS} {xs.DASH} every finding in one list, worst first. Use the arrows in the header row "
+        "to filter or sort. Folded columns on the right hold more detail; click the small + above the "
+        "column letters to open them.",
+    ]
+    if result.reconciliation:
+        lines.append(f"{_SAP_VS_US} {xs.DASH} SAP's own ratings next to ours, so you can see where we "
+                     "agree and where a second look is worthwhile.")
+    if vd.heatmap_rows(result):
+        lines.append(f"{_HEATMAP} {xs.DASH} which report sections carry which kinds of risk, coloured by "
+                     "the most serious finding.")
+    for value in lines:
+        ws.merge_cells(f"B{r}:H{r}")
+        c = ws.cell(r, 2, value)
+        c.font = _font()
+        c.alignment = top_left
+        ws.row_dimensions[r].height = max(15, 15 * _text_lines(value, 110))
+        r += 1
 
 
 def _coverage_lines(result: AnalysisResult) -> list[tuple[str, bool]]:
@@ -524,17 +490,21 @@ def _worst_of(severities):
     return next((sev for sev in vd.SEVERITIES if sev in present), None)
 
 
-def _heat_legend():
-    """One line: a coloured dot and the name for each severity."""
-    label = "Colour = most serious finding:  "
+def _legend(label, items):
+    """One line: a plain label, then each item (coloured dots and a word) separated by spaces."""
     if not xs.RICH:
-        return label + "   ".join(f"{xs.DOT} {sev}" for sev in vd.SEVERITIES)
+        return label + "   ".join(str(item) for item in items)
     blocks = [TextBlock(xs._inline(xs.NOTE), label)]
-    for i, sev in enumerate(vd.SEVERITIES):
+    for i, item in enumerate(items):
         if i:
             blocks.append(TextBlock(xs._inline(xs.TEXT), "    "))
-        blocks.extend(xs.severity_text(sev))
+        blocks.extend(item)
     return CellRichText(*blocks)
+
+
+def _heat_legend():
+    """One line: a coloured dot and the name for each severity."""
+    return _legend("Colour = most serious finding:  ", [xs.severity_text(sev) for sev in vd.SEVERITIES])
 
 
 def _add_cells(total: dict, cells: dict) -> None:
@@ -761,10 +731,6 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     wb = xs.init_workbook()
     wb.remove(wb.active)
 
-    _build_how_to_read(wb, {
-        _SAP_VS_US if result.reconciliation else "",
-        _HEATMAP if vd.heatmap_rows(result) else "",
-    })
     _build_priority_actions(wb, result)
     _build_all_findings(wb, result)
     if result.reconciliation:
@@ -804,7 +770,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     _finish_sheets(wb)
 
-    # Open on "How to read this workbook" (the first tab)
+    # Open on Priority Actions (the first tab)
     wb.active = 0
     for i, ws in enumerate(wb.worksheets):
         ws.sheet_view.tabSelected = (i == 0)
