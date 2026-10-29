@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report import reconciliation_display as rd
+from ewa_pipeline.report import visual_data as vd
 from ewa_pipeline.report.schemas import (
     AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow,
 )
@@ -23,9 +24,6 @@ _SZ     = 11          # body size
 _C_LINK     = xs.LINK
 
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
-
-# SAP's own traffic-light ratings, and the "SAP vs Us" verdict colours.
-_RATING_ORDER = {"RED": 0, "YELLOW": 1, "GREEN": 2}
 
 _NUM = '#,##0'
 
@@ -471,9 +469,6 @@ _SAP_VS_US = "SAP vs SoftwareONE"
 
 # Results a reader should look at first: shown in bold.
 _BOLD_RESULTS = {rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK}
-_RESULT_ORDER = [rd.RESULT_AGREE, rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK,
-                 rd.RESULT_NOT_FOUND, rd.RESULT_NOT_ANALYSED, rd.RESULT_NO_DETAIL,
-                 rd.RESULT_NO_RATING]
 
 
 def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str],
@@ -498,18 +493,15 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
             ).font = _font(size=10, color=xs.NOTE)
 
     # Summary block: result counts, split by Alerts and Checks.
-    seen = {d.result for d in displays}
-    results = [r for r in _RESULT_ORDER if r in seen] + sorted(seen - set(_RESULT_ORDER))
+    counts = vd.sap_result_counts(rows, analyses)
     sum_hdr = 4
     xs.header_row(ws, sum_hdr, ["Result", None, None, "Alerts", "Checks", "Total"], numeric_cols=(4, 5, 6))
-    for i, result_name in enumerate(results):
+    for i, (result_name, alerts, checks) in enumerate(counts):
         r = sum_hdr + 1 + i
-        alerts = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Alert")
-        checks = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Check")
         ws.cell(r, 1, result_name).font = _font(bold=result_name in _BOLD_RESULTS)
         for col, val in ((4, alerts), (5, checks), (6, alerts + checks)):
             ws.cell(r, col, val).font = _font()
-    sum_last = sum_hdr + len(results)
+    sum_last = sum_hdr + len(counts)
     xs.apply_table_style(ws, header=sum_hdr, last_row=sum_last, last_col=6,
                          numeric_cols=(4, 5, 6), filter=False)
     for r in range(sum_hdr + 1, sum_last + 1):  # labels run across the empty cells beside them
@@ -576,14 +568,7 @@ def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
     if not healthy:
         return False
 
-    # Worst SAP rating among Check rows that point at each section.
-    sap_rating: dict[str, str] = {}
-    for row in result.reconciliation:
-        if row.source != "Check" or row.sap_rating not in _RATING_ORDER:
-            continue
-        best = sap_rating.get(row.our_section_id)
-        if best is None or _RATING_ORDER[row.sap_rating] < _RATING_ORDER[best]:
-            sap_rating[row.our_section_id] = row.sap_rating
+    sap_rating = vd.sap_rating_by_section(result.reconciliation)
 
     ws = wb.create_sheet("No Issues Found")
     _apply_app_style(ws)
