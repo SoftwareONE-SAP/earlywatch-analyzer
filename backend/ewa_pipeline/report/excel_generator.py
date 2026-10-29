@@ -238,7 +238,11 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         ws.column_dimensions[col].width = width
 
     # Aggregate KPI counts
-    totals = vd.severity_totals(result)
+    totals = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    for da in result.domain_analyses:
+        for f in da.findings:
+            if f.severity in totals:
+                totals[f.severity] += 1
     total_findings = sum(totals.values())
 
     top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
@@ -301,80 +305,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         nc.font = _font(bold=True, size=20)
         nc.alignment = Alignment(horizontal="right", vertical="center")
     r = number_row + 2
-
-    # Rows that charts anchor to (step 3), filled in as the blocks are built.
-    anchors: dict = {"tile_number_row": number_row, "sap_header_row": None, "sap_rows": {}}
-    plain_hdr_line = Border(bottom=Side(style="thin", color=xs.NAVY))
-    row_line = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
-
-    # Top 3 fixes: a plain rule of thumb (severity, then effort), not a judgement.
-    fixes = vd.top_fixes(result, 3)
-    if fixes:
-        c = ws.cell(r, 2, "Top 3 fixes (suggested order)")
-        c.font = _font(bold=True, size=12, color=xs.NAVY)
-        ws.row_dimensions[r].height = 20
-        r += 1
-        ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, "Most serious first, then quickest to do. A simple rule, not a judgement.")
-        c.font = _font(size=10, color=xs.NOTE)
-        c.alignment = top_left
-        r += 1
-        for col, label in ((2, "Suggested fix"), (3, "Severity"), (4, "Effort"), (5, "Ref.")):
-            c = ws.cell(r, col, label)
-            c.font = _font(bold=True)
-            c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        for col in range(2, 9):
-            ws.cell(r, col).border = plain_hdr_line
-        r += 1
-        for fix in fixes:
-            f = fix.finding
-            tc = ws.cell(r, 2, f.title)
-            sname = sheet_map.get(fix.section_id)
-            if sname:
-                tc.hyperlink = f"#'{sname}'!A{fix.row}"
-                tc.font = _link_font()
-            else:
-                tc.font = _font()
-            ws.cell(r, 3, xs.severity_text(f.severity)).font = _font()
-            ws.cell(r, 4, f.remediation.effort_estimate).font = _font()
-            ws.cell(r, 5, f.id).font = _font()
-            for col in range(2, 9):
-                cell = ws.cell(r, col)
-                cell.border = row_line
-                cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-            ws.row_dimensions[r].height = 15 * _text_lines(f.title, 40)
-            r += 1
-        r += 1
-
-    # SAP vs SoftwareONE: how our view compares with SAP's own ratings.
-    if result.reconciliation:
-        c = ws.cell(r, 2, _SAP_VS_US)
-        c.font = _font(bold=True, size=12, color=xs.NAVY)
-        ws.row_dimensions[r].height = 20
-        r += 1
-        anchors["sap_header_row"] = r
-        for col, label in ((2, "Result"), (4, "Alerts"), (5, "Checks"), (6, "Total")):
-            c = ws.cell(r, col, label)
-            c.font = _font(bold=True)
-            c.alignment = Alignment(horizontal="right" if col >= 4 else "left", vertical="top")
-        for col in range(2, 9):
-            ws.cell(r, col).border = plain_hdr_line
-        r += 1
-        for result_name, alerts, checks in vd.sap_result_counts(result.reconciliation,
-                                                                result.domain_analyses):
-            ws.cell(r, 2, result_name).font = _font(bold=result_name in _BOLD_RESULTS)
-            for col, val in ((4, alerts), (5, checks), (6, alerts + checks)):
-                nc = ws.cell(r, col, val)
-                nc.font = _font()
-                nc.alignment = Alignment(horizontal="right", vertical="top")
-            for col in range(2, 9):
-                ws.cell(r, col).border = row_line
-            anchors["sap_rows"][result_name] = r
-            r += 1
-        c = ws.cell(r, 2, f"Details on the {_SAP_VS_US} tab")
-        c.hyperlink = f"#'{_SAP_VS_US}'!A1"
-        c.font = _link_font()
-        r += 2
 
     # Top 5 priority actions
     c = ws.cell(r, 2, "Top 5 priority actions")
@@ -443,7 +373,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         r += 1
 
     ws.auto_filter.ref = f"B{tbl_hdr_row}:H{max(r - 1, tbl_hdr_row)}"
-    return anchors
 
 
 def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
