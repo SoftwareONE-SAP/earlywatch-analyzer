@@ -44,7 +44,7 @@ DASH = "—"       # em dash
 FRONT_TABS = (
     "How to read this workbook",
     "Executive Summary",
-    "All Findings",
+    "Findings",
     "SAP vs SoftwareONE",
     "No Issues Found",
     "Risk Heatmap",

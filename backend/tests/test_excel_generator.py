@@ -1,4 +1,4 @@
-"""The Excel workbook has an All Findings tab and keeps the section-sheet layout."""
+"""The Excel workbook has a Findings tab and keeps the section-sheet layout."""
 from __future__ import annotations
 
 import sys
@@ -94,20 +94,22 @@ class ExcelGeneratorTests(unittest.TestCase):
         generate(build_result(), path)
         self.wb = load_workbook(path)
 
-    def test_all_findings_follows_executive_summary(self):
+    def test_findings_follows_executive_summary(self):
         names = self.wb.sheetnames
         self.assertEqual(names[0], "How to read this workbook")
         self.assertEqual(names[1], "Executive Summary")
-        self.assertEqual(names[2], "All Findings")
+        self.assertEqual(names[2], "Findings")
         for expected in ("Software Configuration", "Performance Indicators", "Action Plan", "Token Usage"):
             self.assertIn(expected, names)
 
-    def test_all_findings_rows_sorted_by_severity(self):
-        ws = self.wb["All Findings"]
+    def test_findings_rows_sorted_by_severity(self):
+        ws = self.wb["Findings"]
         headers = _headers(ws, 1)
-        self.assertEqual(headers[:3], ["Ref.", "Section", "Severity"])
+        self.assertEqual(headers[:9], ["Ref.", "Severity", "Title", "What it means", "Recommended action",
+                                       "Priority", "Effort", "How sure we are", "Section"])
+        self.assertEqual(len(headers), 19)
         self.assertIn("What the SAP report says", headers)
-        self.assertIn("What it means", headers)
+        self.assertEqual(headers[-2:], ["Reviewer note: why check first", "Reviewer note: search query"])
         self.assertEqual(ws.max_row, 3)  # header + exactly 2 findings
 
         rows = [dict(zip(headers, [c.value for c in ws[r]])) for r in (2, 3)]
@@ -130,12 +132,22 @@ class ExcelGeneratorTests(unittest.TestCase):
         self.assertEqual(old["How sure we are"], "—")
         self.assertIn(old["How to confirm"], ("", None))
         self.assertEqual(old["What the SAP report says"], "Kernel 753 [RED]")
+        self.assertEqual(old["Recommended action"], "Upgrade the kernel.")
+        self.assertEqual(old["Priority"], "Short-term")
 
-    def test_finding_id_links_to_section_sheet(self):
-        ws = self.wb["All Findings"]
-        # Same "#'Sheet'!A1" style the Executive Summary already uses.
-        target = ws["A2"].hyperlink.target or ws["A2"].hyperlink.location
-        self.assertEqual(target, "#'Performance Indicators'!A3")
+    def test_detail_columns_are_grouped_and_collapsed(self):
+        ws = self.wb["Findings"]
+        for col in range(10, 20):
+            dim = ws.column_dimensions[get_column_letter(col)]
+            self.assertTrue(dim.hidden, col)
+            self.assertEqual(dim.outlineLevel, 1, col)
+        for col in range(1, 10):
+            dim = ws.column_dimensions[get_column_letter(col)]
+            self.assertFalse(dim.hidden, col)
+            self.assertEqual(dim.outlineLevel, 0, col)
+        self.assertEqual(ws.freeze_panes, "A2")
+        self.assertEqual(ws.auto_filter.ref, "A1:S3")
+        self.assertIsNone(ws["A2"].hyperlink)  # no link from Ref. to a section tab any more
 
     def test_section_sheet_layout_kept_for_summary_formulas(self):
         ws = self.wb["Software Configuration"]
@@ -191,14 +203,14 @@ class ExcelGeneratorTests(unittest.TestCase):
             self.assertTrue(any(f.endswith(f',"*{word}")') for f in formulas), word)
         self.assertFalse(any(f.endswith(',"High")') for f in formulas))
 
-    def test_section_named_all_findings_does_not_collide(self):
+    def test_section_named_findings_does_not_collide(self):
         result = build_result()
-        result.domain_analyses[0].section_title = "All Findings"
+        result.domain_analyses[0].section_title = "Findings"
         path = Path(self._tmp.name) / "collide.xlsx"
         generate(result, path)
         names = load_workbook(path).sheetnames
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(names[2], "All Findings")
+        self.assertEqual(names[2], "Findings")
 
     def test_how_to_read_is_first_and_active(self):
         self.assertEqual(self.wb.active.title, "How to read this workbook")
@@ -212,13 +224,13 @@ class ExcelGeneratorTests(unittest.TestCase):
 
     def test_technical_tabs_are_hidden_and_the_rest_visible(self):
         self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
-        for name in ("How to read this workbook", "Executive Summary", "All Findings",
+        for name in ("How to read this workbook", "Executive Summary", "Findings",
                      "Software Configuration", "Action Plan"):
             self.assertEqual(self.wb[name].sheet_state, "visible", name)
 
     def test_tab_order_front_tabs_sections_then_action_plan(self):
         names = self.wb.sheetnames
-        self.assertEqual(names[:3], ["How to read this workbook", "Executive Summary", "All Findings"])
+        self.assertEqual(names[:3], ["How to read this workbook", "Executive Summary", "Findings"])
         self.assertLess(names.index("Performance Indicators"), names.index("Action Plan"))
         self.assertLess(names.index("Action Plan"), names.index("Token Usage"))
 
@@ -309,7 +321,7 @@ class SapVsUsTests(unittest.TestCase):
         ]
         wb = self._generate(result)
         self.assertEqual(wb.sheetnames[:4],
-                         ["How to read this workbook", "Executive Summary", "All Findings", "SAP vs SoftwareONE"])
+                         ["How to read this workbook", "Executive Summary", "Findings", "SAP vs SoftwareONE"])
         ws = wb["SAP vs SoftwareONE"]
 
         counts = {ws.cell(r, 1).value: (ws.cell(r, 4).value, ws.cell(r, 5).value, ws.cell(r, 6).value)
@@ -384,7 +396,7 @@ class SapVsUsTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:5], ["All Findings", "SAP vs SoftwareONE", "No Issues Found"])
+        self.assertEqual(names[2:5], ["Findings", "SAP vs SoftwareONE", "No Issues Found"])
 
     def test_old_payload_has_neither_sheet(self):
         wb = self._generate(build_result())
@@ -413,7 +425,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
             self.assertFalse(ws.sheet_view.showGridLines, ws.title)
 
     def test_table_headers_are_navy_with_bold_white_text(self):
-        ws = self.wb["All Findings"]
+        ws = self.wb["Findings"]
         for cell in ws[1]:
             self.assertTrue(cell.font.b)
             self.assertEqual(cell.font.name, "Aptos")
@@ -440,7 +452,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                         self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
 
     def test_only_front_tabs_have_navy_tab_colour(self):
-        front = {"How to read this workbook", "Executive Summary", "All Findings",
+        front = {"How to read this workbook", "Executive Summary", "Findings",
                  "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
@@ -450,7 +462,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                 self.assertIsNone(colour, ws.title)
 
     def test_print_setup_a4_landscape_one_page_wide(self):
-        ws = self.wb["All Findings"]
+        ws = self.wb["Findings"]
         self.assertEqual(ws.page_setup.orientation, "landscape")
         self.assertEqual(int(ws.page_setup.paperSize), 9)
         self.assertEqual(ws.page_setup.fitToWidth, 1)
@@ -599,7 +611,7 @@ class RiskHeatmapTests(unittest.TestCase):
         self.assertNotIn("SAP rating", headers)  # old payload: no reconciliation
         total = ws[self._find_row(ws, "Total")]
         by_name = {h: c.value for h, c in zip(headers, total)}
-        all_rows = self._generate(result)["All Findings"].max_row - 1
+        all_rows = self._generate(result)["Findings"].max_row - 1
         self.assertEqual(by_name["Findings"], all_rows)
         self.assertEqual(by_name["Performance"], 1)
         self.assertEqual(by_name["Cost"], 1)
@@ -665,4 +677,4 @@ class RiskHeatmapTests(unittest.TestCase):
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:6], ["All Findings", "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"])
+        self.assertEqual(names[2:6], ["Findings", "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"])

@@ -118,6 +118,7 @@ def _worst_severity(findings):
 
 _HOW_TO_READ = "How to read this workbook"
 _LINKED = "Linked Issues"
+_FINDINGS = "Findings"
 
 
 def _build_how_to_read(wb: Workbook, tabs: set[str]):
@@ -137,8 +138,8 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     add("What each tab shows", "head")
     add("Executive Summary " + xs.DASH + " the overall health, the most urgent actions and the number of "
         "findings in each report section.")
-    add("All Findings " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
-        "header row to filter or sort.")
+    add(f"{_FINDINGS} " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
+        "header row to filter or sort. More detail sits in the folded columns on the right.")
     if _SAP_VS_US in tabs:
         add(f"{_SAP_VS_US} " + xs.DASH + " SAP's own ratings next to ours, so you can see where we agree "
             "and where a second look is worthwhile.")
@@ -481,17 +482,18 @@ def _refs_in_text(text, result: AnalysisResult) -> list[str]:
     return found
 
 
-def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
-    """One flat, filterable table of every finding, worst first."""
-    ws = wb.create_sheet("All Findings")
+def _build_all_findings(wb: Workbook, result: AnalysisResult):
+    """One flat, filterable table of every finding, worst first. Detail columns are folded away."""
+    ws = wb.create_sheet(_FINDINGS)
     _apply_app_style(ws)
 
     COLS = [
-        "Ref.", "Section", "Severity", "Risk area", "Title",
-        "What the SAP report says", "What it means", "How sure we are",
-        "Why", "How to confirm", "Impact", "Recommended action",
-        "SAP transactions", "Effort", "Priority", "Due date",
-        "Check latest SAP guidance first?",
+        "Ref.", "Severity", "Title", "What it means", "Recommended action",
+        "Priority", "Effort", "How sure we are", "Section",
+        # columns 10-19: grouped and collapsed
+        "Risk area", "What the SAP report says", "Impact", "Why", "How to confirm",
+        "SAP transactions", "Check latest SAP guidance first?", "Due date",
+        "Reviewer note: why check first", "Reviewer note: search query",
     ]
     _hdr_row(ws, 1, COLS)
     ws.freeze_panes = "A2"
@@ -501,30 +503,21 @@ def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[st
     for i, (da, f) in enumerate(rows):
         r = 2 + i
         vals = [
-            f.id, da.section_title, xs.severity_text(f.severity), ", ".join(f.risk_types), f.title,
-            f.evidence, f.description, xs.sure_dots(f.confidence),
-            f.confidence_reason, f.to_confirm, f.impact, f.remediation.action,
-            ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority, f.due_date,
-            None,
+            f.id, xs.severity_text(f.severity), f.title, f.description, f.remediation.action,
+            f.remediation.priority, f.remediation.effort_estimate, xs.sure_dots(f.confidence),
+            da.section_title,
+            ", ".join(f.risk_types), f.evidence, f.impact, f.confidence_reason, f.to_confirm,
+            ", ".join(f.remediation.sap_transactions), None, f.due_date,
+            f.remediation.validation_reason, f.remediation.validation_query,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=17), f.remediation.external_validation_required)
+        _guidance_cell(ws.cell(row=r, column=16), f.remediation.external_validation_required)
 
     xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
-
-    # Ref. links to the finding's row on its section sheet (after styling, which resets fonts only on borders).
-    for i, (da, f) in enumerate(rows):
-        sname = sheet_map.get(da.section_id)
-        if sname:
-            f_idx = next(n for n, x in enumerate(da.findings) if x is f)
-            idc = ws.cell(row=2 + i, column=1)
-            idc.hyperlink = f"#'{sname}'!A{3 + f_idx}"
-            idc.font = _link_font()
-
     _set_widths(ws, 1, len(COLS))
+    _collapse_group(ws, 10, len(COLS))
 
 
 _SAP_VS_US = "SAP vs SoftwareONE"
@@ -955,7 +948,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
 
     sheet_map: dict[str, str] = {}
-    used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", _LINKED, "Action Plan", "Document Structure",
+    used: set[str] = {_HOW_TO_READ, "Executive Summary", _FINDINGS, _LINKED, "Action Plan", "Document Structure",
                       "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found", _HEATMAP}
     for da in result.domain_analyses:
         if not da.findings:
@@ -975,7 +968,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         _LINKED if result.cross_references else "",
     })
     _build_executive_summary(wb, result, sheet_map)
-    _build_all_findings(wb, result, sheet_map)
+    _build_all_findings(wb, result)
     if result.reconciliation:
         _build_sap_vs_us(wb, result.reconciliation, sheet_map, result.domain_analyses)
     if result.coverage:
