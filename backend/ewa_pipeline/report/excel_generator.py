@@ -2,15 +2,10 @@
 Deterministic Excel workbook generator for EWA analysis results.
 """
 
-import math
 import re
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference, Series
-from openpyxl.chart.label import DataLabelList
-from openpyxl.chart.shapes import GraphicalProperties
-from openpyxl.drawing.line import LineProperties
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -233,52 +228,6 @@ def _clean_action(text) -> str:
     return re.sub(r"^\s*(?:\d+\s*[.)]|[-•*])\s*", "", str(text)).strip()
 
 
-_CHART_WIDTH_CM = 19
-_ROW_CM = 0.53   # default row height (15 pt)
-
-
-def _add_bar_chart(ws, anchor_row: int, series: list[tuple[str, Reference, str]], *,
-                   grouping: str, height_cm: float, categories: Reference | None = None) -> int:
-    """Put a horizontal bar chart at column B of anchor_row.
-
-    series: (title, values reference, hex colour). Returns how many rows to reserve
-    so the next block starts below the chart.
-    """
-    chart = BarChart()
-    chart.type = "bar"
-    chart.grouping = grouping
-    chart.overlap = 100
-    chart.width = _CHART_WIDTH_CM
-    chart.height = height_cm
-    # Legend on top so it cannot sit on the axis numbers.
-    chart.legend.position = "t"
-    chart.legend.overlay = False
-    # Square frame with no border line (Excel defaults to a rounded, grey one).
-    chart.roundedCorners = False
-    chart.graphical_properties = GraphicalProperties(ln=LineProperties(noFill=True))
-    # openpyxl 3.1 hides the axes unless told otherwise.
-    chart.x_axis.delete = False
-    chart.y_axis.delete = False
-    # Thin light-grey gridlines instead of Excel's heavy default.
-    chart.y_axis.majorGridlines.spPr = GraphicalProperties(
-        ln=LineProperties(solidFill=xs.ROW_LINE, w=6350))
-    # Show the count on each segment (also on the 100% chart); blank out zeros.
-    chart.dataLabels = DataLabelList(showVal=True, showSerName=False, showCatName=False,
-                                     showLegendKey=False, showPercent=False, numFmt="0;;;")
-    for title, values, colour in series:
-        s = Series(values, title=title)
-        s.graphicalProperties.solidFill = colour
-        s.graphicalProperties.line.solidFill = colour
-        chart.series.append(s)
-    if categories is not None:
-        chart.set_categories(categories)
-    else:
-        # No categories: Excel would label the single bar "1", so drop the whole axis.
-        chart.x_axis.delete = True
-    ws.add_chart(chart, f"B{anchor_row}")
-    return math.ceil(height_cm / _ROW_CM) + 1
-
-
 def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
     ws = wb.create_sheet("Executive Summary")
     _apply_app_style(ws, hide_headers=True)
@@ -353,12 +302,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         nc.alignment = Alignment(horizontal="right", vertical="center")
     r = number_row + 2
 
-    # Severity mix: one 100% bar, drawn from the tile numbers above it.
-    if total_findings:
-        sev_series = [(sev, Reference(ws, min_col=5 + i, min_row=number_row), xs.SEVERITY_COLOURS[sev])
-                      for i, sev in enumerate(_SEV_ORDER)]
-        r += _add_bar_chart(ws, r, sev_series, grouping="percentStacked", height_cm=3.5)
-
     # Rows that charts anchor to (step 3), filled in as the blocks are built.
     anchors: dict = {"tile_number_row": number_row, "sap_header_row": None, "sap_rows": {}}
     plain_hdr_line = Border(bottom=Side(style="thin", color=xs.NAVY))
@@ -431,17 +374,7 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
         c = ws.cell(r, 2, f"Details on the {_SAP_VS_US} tab")
         c.hyperlink = f"#'{_SAP_VS_US}'!A1"
         c.font = _link_font()
-        r += 1
-        # Chart: one bar per column (Alerts, Checks), one colour per result.
-        sap_series = [
-            (name, Reference(ws, min_col=4, max_col=5, min_row=row),
-             xs.RESULT_COLOURS.get(name, xs.RESULT_DEFAULT_COLOUR))
-            for name, row in anchors["sap_rows"].items()
-        ]
-        hdr = anchors["sap_header_row"]
-        r += _add_bar_chart(ws, r, sap_series, grouping="stacked", height_cm=6,
-                            categories=Reference(ws, min_col=4, max_col=5, min_row=hdr))
-        r += 1
+        r += 2
 
     # Top 5 priority actions
     c = ws.cell(r, 2, "Top 5 priority actions")

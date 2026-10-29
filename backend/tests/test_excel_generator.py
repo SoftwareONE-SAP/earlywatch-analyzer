@@ -4,7 +4,6 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -588,94 +587,6 @@ class ExecutiveSummaryDecisionBlockTests(unittest.TestCase):
         for name in ("Top 3 fixes (suggested order)", "SAP vs SoftwareONE", "Top 5 priority actions"):
             self.assertLess(self._find(ws, name), last)
         self.assertEqual(ws.cell(last + 1, 3).value, "Worst severity")
-
-
-class ExecutiveSummaryChartTests(unittest.TestCase):
-    _book = ExecutiveSummaryDecisionBlockTests._book
-    _result = ExecutiveSummaryDecisionBlockTests._result
-    _find = ExecutiveSummaryDecisionBlockTests._find
-
-    def _with_sap(self):
-        result = self._result()
-        result.reconciliation = [
-            _row("Alert", "Agree", sap_item="A", sap_rating="RED", our_rating="RED"),
-            _row("Check", "We rated higher", sap_topic="Hardware", sap_rating="YELLOW", our_rating="RED"),
-            _row("Alert", "Not covered", sap_item="Odd", sap_rating="YELLOW"),
-        ]
-        return result
-
-    def _sap_rows(self, ws):
-        hdr = self._find(ws, "SAP vs SoftwareONE") + 1
-        n = 0
-        while ws.cell(hdr + 1 + n, 4).value is not None:
-            n += 1
-        return hdr, n
-
-    def _colours(self, chart):
-        return [s.graphicalProperties.solidFill.srgbClr for s in chart.series]
-
-    def test_full_result_has_two_charts(self):
-        ws = self._book(self._with_sap())["Executive Summary"]
-        self.assertEqual(len(ws._charts), 2)
-
-    def test_severity_chart(self):
-        from ewa_pipeline.report import excel_style as xs
-        ws = self._book(self._with_sap())["Executive Summary"]
-        chart = ws._charts[0]
-        self.assertEqual(chart.grouping, "percentStacked")
-        self.assertEqual(len(chart.series), 4)
-        self.assertEqual(self._colours(chart), [xs.SEVERITY_COLOURS[s] for s in
-                                                ("Critical", "High", "Medium", "Low")])
-
-    def test_sap_chart(self):
-        from ewa_pipeline.report import excel_style as xs
-        ws = self._book(self._with_sap())["Executive Summary"]
-        chart = ws._charts[1]
-        _hdr, n = self._sap_rows(ws)
-        self.assertEqual(chart.grouping, "stacked")
-        self.assertEqual(len(chart.series), n)
-        want = [xs.RESULT_COLOURS[ws.cell(_hdr + 1 + i, 2).value] for i in range(n)]
-        self.assertEqual(self._colours(chart), want)
-
-    def test_charts_do_not_cover_next_block(self):
-        ws = self._book(self._with_sap())["Executive Summary"]
-        sev_row = ws._charts[0].anchor._from.row + 1
-        self.assertLess(sev_row + 7, self._find(ws, "Top 3 fixes (suggested order)"))
-        sap_row = ws._charts[1].anchor._from.row + 1
-        self.assertLess(sap_row + 11, self._find(ws, "Top 5 priority actions"))
-
-    def test_chart_layout_is_tidy(self):
-        from ewa_pipeline.report import excel_style as xs
-        ws = self._book(self._with_sap())["Executive Summary"]
-        for chart in ws._charts:
-            self.assertEqual(chart.legend.position, "t")
-            self.assertFalse(chart.legend.overlay)
-            self.assertTrue(chart.dataLabels.showVal)
-            self.assertFalse(chart.dataLabels.showSerName)
-            self.assertFalse(chart.dataLabels.showCatName)
-            self.assertFalse(chart.dataLabels.showPercent)
-            self.assertEqual(chart.y_axis.majorGridlines.spPr.ln.solidFill.srgbClr, xs.ROW_LINE)
-        # The reader drops roundedCorners, so check the saved chart XML itself.
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "out.xlsx"
-            generate(self._with_sap(), path)
-            with zipfile.ZipFile(path) as z:
-                for name in (n for n in z.namelist() if n.startswith("xl/charts/chart")):
-                    self.assertIn('<roundedCorners val="0"', z.read(name).decode("utf-8"))
-        # Severity chart has no categories: its category axis is hidden; the SAP chart keeps them.
-        self.assertTrue(ws._charts[0].x_axis.delete)
-        self.assertFalse(ws._charts[1].x_axis.delete)
-
-    def test_no_reconciliation_one_chart(self):
-        ws = self._book(self._result())["Executive Summary"]
-        self.assertEqual(len(ws._charts), 1)
-
-    def test_no_findings_no_reconciliation_no_charts(self):
-        result = build_result()
-        for da in result.domain_analyses:
-            da.findings = []
-        ws = self._book(result)["Executive Summary"]
-        self.assertEqual(len(ws._charts), 0)
 
 
 if __name__ == "__main__":
