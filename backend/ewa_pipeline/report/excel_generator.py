@@ -8,7 +8,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference, Series
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report import excel_style as xs
@@ -145,6 +146,9 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
             "and where a second look is worthwhile.")
     if "No Issues Found" in tabs:
         add("No Issues Found " + xs.DASH + " report sections we checked and found clean.")
+    if _HEATMAP in tabs:
+        add(f"{_HEATMAP} " + xs.DASH + " which report sections carry which kinds of risk, coloured by "
+            "the most serious finding.")
     add("Section tabs " + xs.DASH + " one tab per report section with findings: what the SAP report says, "
         "what it means and what to do about it.")
     if _LINKED in tabs:
@@ -672,6 +676,158 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     _collapse_group(ws, 11, 14)
 
 
+_HEATMAP = "Risk Heatmap"
+_HEATMAP_GROUP_OVER = 25  # more section rows than this: fold them under one row per chapter
+
+
+def _heat_fill(severity):
+    colour = xs.SEVERITY_COLOURS[severity]
+    return PatternFill("solid", start_color=colour, end_color=colour)
+
+
+def _worst_of(severities):
+    present = set(severities)
+    return next((sev for sev in vd.SEVERITIES if sev in present), None)
+
+
+def _heat_legend():
+    """One line: a coloured dot and the name for each severity."""
+    label = "Colour = most serious finding:  "
+    if not xs.RICH:
+        return label + "   ".join(f"{xs.DOT} {sev}" for sev in vd.SEVERITIES)
+    blocks = [TextBlock(xs._inline(xs.NOTE), label)]
+    for i, sev in enumerate(vd.SEVERITIES):
+        if i:
+            blocks.append(TextBlock(xs._inline(xs.TEXT), "    "))
+        blocks.extend(xs.severity_text(sev))
+    return CellRichText(*blocks)
+
+
+def _add_cells(total: dict, cells: dict) -> None:
+    """Add {type: (count, worst severity)} into a running total, in place."""
+    for rt, (count, worst) in cells.items():
+        old_count, old_worst = total.get(rt, (0, worst))
+        total[rt] = (old_count + count, _worst_of([old_worst, worst]))
+
+
+def _build_risk_heatmap(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]) -> bool:
+    """Sections down, risk types across. Number = findings, colour = most serious one.
+
+    Returns False (no sheet) when there is nothing to show.
+    """
+    rows = vd.heatmap_rows(result)
+    if not rows:
+        return False
+    types = vd.heatmap_columns(result)
+    with_sap = bool(result.reconciliation)
+
+    ws = wb.create_sheet(_HEATMAP)
+    _apply_app_style(ws)
+
+    first_type = 3 if with_sap else 2
+    findings_col = first_type + len(types)
+    ncols = findings_col
+    cols = ["Section"] + (["SAP rating"] if with_sap else []) + types + ["Findings"]
+
+    ws.cell(1, 1, _HEATMAP)
+    xs.title_band(ws, 1, 1, ncols)
+    ws.cell(2, 1, "Number = findings of that risk type. Colour = the most serious of them. "
+                  "A finding with two risk types counts in both.").font = _font(size=10, color=xs.NOTE)
+    _hdr_row(ws, 3, cols)
+    for col in range(first_type, ncols + 1):
+        ws.cell(3, col).alignment = _align("center", "top", True)
+    ws.freeze_panes = "A4"
+
+    def put_grid(r, cells, findings, bold=False):
+        for i, rt in enumerate(types):
+            if rt not in cells:
+                continue
+            count, worst = cells[rt]
+            c = ws.cell(r, first_type + i, count)
+            c.font = _font(bold=True, color=xs.WHITE)
+            c.fill = _heat_fill(worst)
+        ws.cell(r, findings_col, findings if findings else xs.muted(xs.DASH)).font = _font(bold=bold)
+
+    def finish_row(r):
+        for col in range(1, ncols + 1):
+            c = ws.cell(r, col)
+            c.border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+            c.alignment = _align("center" if col >= first_type else "left", "center", wrap=(col == 1))
+
+    # Plain list, or one folded group per chapter when the list is long.
+    grouped = len(rows) > _HEATMAP_GROUP_OVER
+    layout: list[tuple[str, object]] = []  # ("chapter", (title, rows)) or ("section", HeatRow)
+    if grouped:
+        chapters: dict = {}
+        for row in rows:
+            chapters.setdefault(row.chapter, []).append(row)
+        for chapter in sorted(chapters, key=lambda ch: (ch[0] is None, ch[0] or 0)):
+            layout.append(("chapter", (chapter[1], chapters[chapter])))
+            layout.extend(("section", row) for row in chapters[chapter])
+        ws.sheet_properties.outlinePr.summaryBelow = False
+    else:
+        layout = [("section", row) for row in rows]
+
+    r = 3
+    links: list[tuple[int, str]] = []
+    for kind, item in layout:
+        r += 1
+        if kind == "chapter":
+            title, members = item
+            cells: dict[str, tuple[int, str]] = {}
+            for m in members:
+                _add_cells(cells, m.cells)
+            ws.cell(r, 1, title).font = _font(bold=True)
+            if with_sap:
+                ratings = [m.sap_rating for m in members if m.sap_rating]
+                best = min(ratings, key=lambda x: vd.RATING_ORDER[x], default=None)
+                ws.cell(r, 2, xs.rating_text(best)).font = _font(bold=True)
+            put_grid(r, cells, sum(m.findings for m in members), bold=True)
+            finish_row(r)
+            ws.row_dimensions[r].collapsed = True
+            continue
+        row = item
+        ws.cell(r, 1, row.title).font = _font()
+        if with_sap:
+            ws.cell(r, 2, xs.rating_text(row.sap_rating)).font = _font()
+        put_grid(r, row.cells, row.findings)
+        finish_row(r)
+        if sheet_map.get(row.section_id):
+            links.append((r, sheet_map[row.section_id]))
+        if grouped:
+            ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
+            ws.row_dimensions[r].outlineLevel = 1
+            ws.row_dimensions[r].hidden = True
+    for rr, sname in links:
+        ws.cell(rr, 1).hyperlink = f"#'{sname}'!A1"
+        ws.cell(rr, 1).font = _link_font()
+
+    # Total row: distinct findings per type (a finding sits in one section, so section counts add up).
+    r += 1
+    totals: dict[str, tuple[int, str]] = {}
+    for row in rows:
+        _add_cells(totals, row.cells)
+    ws.cell(r, 1, "Total").font = _font(bold=True)
+    for i, rt in enumerate(types):
+        if rt in totals:
+            ws.cell(r, first_type + i, totals[rt][0]).font = _font(bold=True)
+    ws.cell(r, findings_col, sum(row.findings for row in rows)).font = _font(bold=True)
+    finish_row(r)
+    for col in range(1, ncols + 1):
+        ws.cell(r, col).border = Border(top=Side(style="thin", color=xs.NAVY),
+                                        bottom=Side(style="thin", color=xs.ROW_LINE))
+
+    ws.cell(r + 2, 1, _heat_legend())
+
+    ws.column_dimensions["A"].width = 44
+    if with_sap:
+        ws.column_dimensions["B"].width = 14
+    for col in range(first_type, findings_col):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+    ws.column_dimensions[get_column_letter(findings_col)].width = 10
+    return True
+
+
 def _healthy_sections(result: AnalysisResult) -> list:
     """Coverage entries we analysed and found clean."""
     with_findings = {da.section_id for da in result.domain_analyses if da.findings}
@@ -863,7 +1019,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     sheet_map: dict[str, str] = {}
     used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", _LINKED, "Action Plan", "Document Structure",
-                      "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found"}
+                      "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found", _HEATMAP}
     for da in result.domain_analyses:
         if not da.findings:
             continue
@@ -878,6 +1034,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     _build_how_to_read(wb, {
         _SAP_VS_US if result.reconciliation else "",
         "No Issues Found" if _has_healthy_sections(result) else "",
+        _HEATMAP if vd.heatmap_rows(result) else "",
         _LINKED if result.cross_references else "",
     })
     _build_executive_summary(wb, result, sheet_map)
@@ -886,6 +1043,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         _build_sap_vs_us(wb, result.reconciliation, sheet_map, result.domain_analyses)
     if result.coverage:
         _build_verified_healthy(wb, result)
+    _build_risk_heatmap(wb, result, sheet_map)
     for da in result.domain_analyses:
         if da.section_id in sheet_map:
             _build_section_sheet(wb, da, sheet_map[da.section_id])

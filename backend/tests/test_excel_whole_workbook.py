@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText
 
+from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report.excel_generator import generate
 from ewa_pipeline.report.schemas import (
     AnalysisTaskRecord, CrossReference, ReconciliationRow, SectionCoverage, SystemProfile,
@@ -60,14 +61,15 @@ class WholeWorkbookStyleTests(unittest.TestCase):
     def test_every_expected_tab_is_present(self):
         names = self.wb.sheetnames
         for name in ("How to read this workbook", "Executive Summary", "All Findings", "SAP vs SoftwareONE",
-                     "No Issues Found", "Linked Issues", "Action Plan", "Document Structure",
+                     "No Issues Found", "Risk Heatmap", "Linked Issues", "Action Plan", "Document Structure",
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
 
     def _navy_rows(self, ws):
         """Title-band rows and table-header rows: the only rows allowed to have a fill."""
         rows = set()
-        if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE"):
+        if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE",
+                        "Risk Heatmap"):
             rows.add(1)
         if str(ws["A1"].value).startswith("←"):
             rows.add(1)  # back-link band on section tabs
@@ -87,6 +89,10 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                 if cell.fill.fill_type in (None, ""):
                     continue
                 self.assertEqual(cell.fill.fill_type, "solid", where)
+                if ws.title == "Risk Heatmap" and cell.row not in navy_rows:
+                    # deliberate heatmap exception: grid cells are filled with the severity colours
+                    self.assertIn(cell.fill.start_color.rgb[-6:], xs.SEVERITY_COLOURS.values(), where)
+                    continue
                 self.assertEqual(cell.fill.start_color.rgb[-6:], "1F3864", where)
                 self.assertIn(cell.row, navy_rows, where)
 
@@ -100,8 +106,14 @@ class WholeWorkbookStyleTests(unittest.TestCase):
         for ws in self.wb.worksheets:
             navy_rows = self._navy_rows(ws)
             for cell in ws._cells.values():
-                if cell.row not in navy_rows:
-                    self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
+                if cell.row in navy_rows:
+                    continue
+                if ws.title == "Risk Heatmap" and cell.fill.fill_type == "solid":
+                    # deliberate heatmap exception: only the severity colours may fill a body cell
+                    self.assertIn(cell.fill.start_color.rgb[-6:], xs.SEVERITY_COLOURS.values(),
+                                  f"{ws.title}!{cell.coordinate}")
+                    continue
+                self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
 
     def test_every_font_is_aptos_including_rich_text_runs(self):
         for ws in self.wb.worksheets:

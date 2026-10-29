@@ -379,7 +379,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
 
     def test_only_front_tabs_have_navy_tab_colour(self):
         front = {"How to read this workbook", "Executive Summary", "All Findings",
-                 "SAP vs SoftwareONE", "No Issues Found"}
+                 "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
             if ws.title in front:
@@ -657,3 +657,105 @@ class ExecutiveSummaryChartTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RiskHeatmapTests(unittest.TestCase):
+    def _generate(self, result):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        generate(result, path)
+        return load_workbook(path)
+
+    @staticmethod
+    def _find_row(ws, label):
+        return next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == label)
+
+    def _many_sections(self, n=26):
+        result = build_result()
+        result.domain_analyses = [
+            DomainAnalysis(
+                section_title=f"{(i // 5) + 1}.{i % 5 + 1} Part {i}", section_id=f"s{i}",
+                findings=[Finding(
+                    id=f"G-{i}", title="t", severity="High" if i % 2 else "Low", description="d",
+                    evidence="e", impact="i", remediation=_remediation("a"),
+                    risk_types=["Security", "Cost"])],
+                overall_health="Warning")
+            for i in range(n)]
+        return result
+
+    def test_totals_match_findings_and_types(self):
+        result = build_result()  # F-001 untagged (Medium); F-002 Performance + Cost (Critical)
+        ws = self._generate(result)["Risk Heatmap"]
+        headers = [c.value for c in ws[3]]
+        self.assertEqual(headers[0], "Section")
+        self.assertNotIn("SAP rating", headers)  # old payload: no reconciliation
+        total = ws[self._find_row(ws, "Total")]
+        by_name = {h: c.value for h, c in zip(headers, total)}
+        all_rows = self._generate(result)["All Findings"].max_row - 1
+        self.assertEqual(by_name["Findings"], all_rows)
+        self.assertEqual(by_name["Performance"], 1)
+        self.assertEqual(by_name["Cost"], 1)
+        self.assertEqual(by_name["Not tagged"], 1)
+        self.assertIsNone(by_name["Security"])
+
+    def test_cell_fill_is_worst_severity_colour(self):
+        from ewa_pipeline.report import excel_style as xs
+        result = build_result()
+        result.domain_analyses[1].findings.append(Finding(
+            id="F-003", title="t", severity="Low", description="d", evidence="e", impact="i",
+            remediation=_remediation("a"), risk_types=["Cost"]))
+        ws = self._generate(result)["Risk Heatmap"]
+        headers = [c.value for c in ws[3]]
+        row = self._find_row(ws, "Performance Indicators")
+        cost = ws.cell(row, headers.index("Cost") + 1)
+        self.assertEqual(cost.value, 2)
+        self.assertEqual(cost.fill.start_color.rgb[-6:], xs.SEVERITY_COLOURS["Critical"])
+        security = ws.cell(row, headers.index("Security") + 1)
+        self.assertIsNone(security.value)
+        self.assertIn(security.fill.fill_type, (None, ""))
+
+    def test_sap_red_section_without_findings_appears(self):
+        result = build_result()
+        result.coverage = [SectionCoverage(section_id="4", section_title="Database", status="analyzed")]
+        result.reconciliation = [_row("Check", "Not covered", sap_topic="Database", sap_rating="RED",
+                                      our_section_id="4")]
+        ws = self._generate(result)["Risk Heatmap"]
+        headers = [c.value for c in ws[3]]
+        self.assertEqual(headers[1], "SAP rating")
+        row = self._find_row(ws, "Database")
+        self.assertEqual(ws.cell(row, 2).value, "● Red")
+        self.assertEqual(ws.cell(row, headers.index("Findings") + 1).value, "—")
+
+    def test_many_sections_are_grouped_by_chapter(self):
+        wb = self._generate(self._many_sections(26))
+        ws = wb["Risk Heatmap"]
+        self.assertFalse(ws.sheet_properties.outlinePr.summaryBelow)
+        hidden = [r for r in range(4, ws.max_row + 1)
+                  if ws.row_dimensions[r].outlineLevel == 1 and ws.row_dimensions[r].hidden]
+        self.assertEqual(len(hidden), 26)
+        chapters = [r for r in range(4, ws.max_row + 1)
+                    if ws.row_dimensions[r].outlineLevel == 0 and ws.cell(r, 1).font.bold
+                    and ws.cell(r, 1).value != "Total"]
+        self.assertEqual(len(chapters), 6)  # 26 sections, 5 per chapter
+        total = ws[self._find_row(ws, "Total")]
+        headers = [c.value for c in ws[3]]
+        self.assertEqual(total[headers.index("Findings")].value, 26)
+        self.assertEqual(total[headers.index("Security")].value, 26)
+
+    def test_few_sections_are_not_grouped(self):
+        ws = self._generate(self._many_sections(5))["Risk Heatmap"]
+        self.assertTrue(all(ws.row_dimensions[r].outlineLevel == 0 for r in range(4, ws.max_row + 1)))
+
+    def test_no_findings_and_no_sap_flags_means_no_tab(self):
+        result = build_result()
+        for da in result.domain_analyses:
+            da.findings = []
+        self.assertNotIn("Risk Heatmap", self._generate(result).sheetnames)
+
+    def test_tab_position_after_no_issues_found(self):
+        result = build_result()
+        result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
+        result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
+        names = self._generate(result).sheetnames
+        self.assertEqual(names[2:6], ["All Findings", "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"])

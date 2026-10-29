@@ -59,6 +59,7 @@ FRONT_TABS = (
     "All Findings",
     "SAP vs SoftwareONE",
     "No Issues Found",
+    "Risk Heatmap",
 )
 
 
