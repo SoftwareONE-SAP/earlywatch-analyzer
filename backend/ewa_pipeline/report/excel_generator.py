@@ -6,28 +6,22 @@ import re
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report import reconciliation_display as rd
+from ewa_pipeline.report import visual_data as vd
 from ewa_pipeline.report.schemas import (
-    AnalysisResult, CrossReference, DomainAnalysis, Finding, ReconciliationRow,
+    AnalysisResult, CrossReference, DomainAnalysis, Finding,
 )
-from ewa_pipeline.tracking.token_tracker import TokenUsage
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-
-_SZ     = 11          # body size
 
 _C_LINK     = xs.LINK
 
 _SEV_ORDER = ["Critical", "High", "Medium", "Low"]
-
-# SAP's own traffic-light ratings, and the "SAP vs Us" verdict colours.
-_RATING_ORDER = {"RED": 0, "YELLOW": 1, "GREEN": 2}
-
-_NUM = '#,##0'
 
 # ── Style helpers ─────────────────────────────────────────────────────────────
 
@@ -45,10 +39,6 @@ def _apply_app_style(ws, *, hide_headers=False):
 
 def _hdr_row(ws, row, values, start_col=1):
     xs.header_row(ws, row, values, start_col=start_col)
-
-def _sheet_ref(name: str) -> str:
-    import re as _re
-    return f"'{name}'" if _re.search(r"[^A-Za-z0-9_]", name) else name
 
 def _autofit_columns(ws, min_width=8, max_width=55, skip_cols=()):
     """Set column widths based on longest content in each column."""
@@ -75,10 +65,9 @@ _WIDTHS = {
     "Reviewer note: why check first": 50, "Reviewer note: search query": 50,
     "SAP list": 11, "SAP topic": 24, "What SAP says": 40, "SAP rating": 14,
     "SoftwareONE rating": 18, "Our finding": 36, "Result": 26, "Explanation": 55,
-    "Report section": 30, "Note": 45, 
+    "Report section": 30,
     "Reviewer note: refs": 18, "Reviewer note: score": 14, "Reviewer note: matched by": 20,
     "Reviewer note: original note": 55,
-    "Related findings": 45, "How they connect": 55, "Combined impact": 50,
 }
 
 def _set_widths(ws, header_row, ncols):
@@ -107,87 +96,10 @@ def _guidance_cell(c, required):
 def _link_font():
     return xs.font(color=_C_LINK, underline="single")
 
-def _worst_severity(findings):
-    """Most serious severity among findings, or None when there are none."""
-    present = {f.severity for f in findings}
-    for sev in _SEV_ORDER:
-        if sev in present:
-            return sev
-    return None
-
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
-_HOW_TO_READ = "How to read this workbook"
-_LINKED = "Linked Issues"
-
-
-def _build_how_to_read(wb: Workbook, tabs: set[str]):
-    """First tab: what each tab is for and what the dots mean. One wide wrapped column."""
-    ws = wb.create_sheet(_HOW_TO_READ)
-    _apply_app_style(ws)
-    ws.column_dimensions["A"].width = 100
-
-    lines: list = []  # (text or rich text, kind) with kind in title / note / head / body
-
-    def add(value, kind="body"):
-        lines.append((value, kind))
-
-    add(_HOW_TO_READ, "title")
-    add("A plain-English review of your SAP EarlyWatch Alert report, prepared by SoftwareONE. "
-        "Read this page first.", "note")
-    add("What each tab shows", "head")
-    add("Executive Summary " + xs.DASH + " the overall health, the most urgent actions and the number of "
-        "findings in each report section.")
-    add("All Findings " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
-        "header row to filter or sort.")
-    if _SAP_VS_US in tabs:
-        add(f"{_SAP_VS_US} " + xs.DASH + " SAP's own ratings next to ours, so you can see where we agree "
-            "and where a second look is worthwhile.")
-    if "No Issues Found" in tabs:
-        add("No Issues Found " + xs.DASH + " report sections we checked and found clean.")
-    add("Section tabs " + xs.DASH + " one tab per report section with findings: what the SAP report says, "
-        "what it means and what to do about it.")
-    if _LINKED in tabs:
-        add(f"{_LINKED} " + xs.DASH + " findings that are connected and are best handled together.")
-    add("Action Plan " + xs.DASH + " every recommended action in one list.")
-
-    add("How serious is a finding?", "head")
-    add(xs.legend_line(xs.severity_text("Critical"), "needs attention straight away."))
-    add(xs.legend_line(xs.severity_text("High"), "should be fixed soon."))
-    add(xs.legend_line(xs.severity_text("Medium"), "plan a fix."))
-    add(xs.legend_line(xs.severity_text("Low"), "worth knowing; low urgency."))
-
-    add("SAP's own traffic lights", "head")
-    add(xs.legend_line(xs.rating_text("RED"), "SAP flags this as a problem."))
-    add(xs.legend_line(xs.rating_text("YELLOW"), "SAP flags this as a warning."))
-    add(xs.legend_line(xs.rating_text("GREEN"), "SAP sees no problem."))
-
-    add("How sure are we?", "head")
-    add(xs.legend_line(xs.sure_dots("High"), "the evidence is clear."))
-    add(xs.legend_line(xs.sure_dots("Medium"), "likely, but worth confirming."))
-    add(xs.legend_line(xs.sure_dots("Low"), "a rough match; please check by hand."))
-
-    add("Good to know", "head")
-    add("Columns called \"Reviewer note\" are folded away. Click the small + above the column letters to "
-        "open them.")
-    add("Some technical tabs are hidden. To see them in Excel, right-click any tab and choose Unhide.")
-    add("\"Check latest SAP guidance first?\" says Yes when the advice depends on current SAP Notes or "
-        "release information that you should look up before acting.")
-
-    for r, (value, kind) in enumerate(lines, 1):
-        c = ws.cell(r, 1, value)
-        if kind == "title":
-            xs.title_band(ws, r, 1, 1)
-        elif kind == "note":
-            c.font = _font(size=10, color=xs.NOTE)
-        elif kind == "head":
-            c.font = _font(bold=True)
-        else:
-            c.font = _font()
-        c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if kind == "head":
-            ws.row_dimensions[r].height = 30  # room above the heading
-            c.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+_FINDINGS = "Findings"
+_PRIORITY = "Priority Actions"
 
 
 _HEALTH_DOT = {"Critical": "C00000", "Warning": "E0A000", "Healthy": "548235"}
@@ -198,57 +110,29 @@ def _text_lines(text, per_line=100) -> int:
     return max(1, sum(max(1, -(-len(part) // per_line)) for part in str(text).split("\n")))
 
 
-def _profile_line(profile) -> str:
-    """One quiet line about the analysed system, built from whatever is known."""
-    if profile is None:
-        return ""
-    parts = []
-    if profile.sid:
-        parts.append(f"System {profile.sid}")
-    for name, version in ((profile.product, profile.product_version),
-                          (profile.database, profile.database_version)):
-        text = " ".join(p for p in (name, version) if p)
-        if text:
-            parts.append(text)
-    if profile.os:
-        parts.append(profile.os)
-    if profile.system_role:
-        parts.append(profile.system_role)
-    if profile.period_start and profile.period_end:
-        parts.append(f"Period {profile.period_start} {xs.DASH} {profile.period_end}")
-    elif profile.period_start or profile.period_end:
-        parts.append(f"Period {profile.period_start or profile.period_end}")
-    return "  ·  ".join(parts)
-
-
 def _clean_action(text) -> str:
     """Drop a leading "1." / "2)" / bullet: the numbering is added by the workbook."""
     return re.sub(r"^\s*(?:\d+\s*[.)]|[-•*])\s*", "", str(text)).strip()
 
 
-def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
-    ws = wb.create_sheet("Executive Summary")
+def _build_priority_actions(wb: Workbook, result: AnalysisResult):
+    """Front tab: the overall health and the top 5 actions, each with links to the findings it names."""
+    ws = wb.create_sheet(_PRIORITY)
     _apply_app_style(ws, hide_headers=True)
 
-    # Margin columns A and I, then fixed widths (the merged text rows do not auto-fit).
+    # Margin columns A and I; B..G hold the merged action text, H the finding refs.
     for col, width in (("A", 2), ("B", 38), ("C", 16), ("D", 11), ("E", 11), ("F", 11),
-                       ("G", 11), ("H", 11), ("I", 2)):
+                       ("G", 11), ("H", 16), ("I", 2)):
         ws.column_dimensions[col].width = width
 
-    # Aggregate KPI counts
-    totals = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
-    for da in result.domain_analyses:
-        for f in da.findings:
-            if f.severity in totals:
-                totals[f.severity] += 1
-    total_findings = sum(totals.values())
-
     top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    line = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
 
-    # Row 1: title
+    # Row 1: title, with the system id when we know it
+    sid = result.system_profile.sid if result.system_profile else ""
     ws.merge_cells("B1:H1")
     c = ws["B1"]
-    c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
+    c.value = f"SAP EarlyWatch Alert {xs.DASH} {sid or 'Deep Analysis Report'}"
     c.font = _font(bold=True, size=16)
     c.alignment = Alignment(horizontal="left", vertical="center")
     xs.title_band(ws, 1, 1, 8)
@@ -264,230 +148,265 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
     c.alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[2].height = 24
 
-    r = 3
-    # System profile line, when we know anything about the system
-    profile = _profile_line(result.system_profile)
-    if profile:
-        ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, profile)
-        c.font = _font(size=10, color=xs.NOTE)
-        c.alignment = top_left
-        ws.row_dimensions[r].height = 15 * _text_lines(profile, 120)
-        r += 1
-
-    # Written summary
-    if result.executive_summary and result.executive_summary.strip():
-        r += 1
-        ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, result.executive_summary.strip())
-        c.font = _font()
-        c.alignment = top_left
-        ws.row_dimensions[r].height = 15 * _text_lines(result.executive_summary.strip(), 100)
-        r += 1
-
-    # Key numbers: a small grey label with its dot, a big number underneath. No fills.
-    r += 1
-    label_row, number_row = r, r + 1
-    ws.row_dimensions[label_row].height = 18
-    ws.row_dimensions[number_row].height = 30
-    tiles = [(4, "Total", None, total_findings)] + [
-        (5 + i, sev, xs.SEVERITY_COLOURS[sev], totals[sev]) for i, sev in enumerate(_SEV_ORDER)
-    ]
-    for col, label, dot_colour, number in tiles:
-        lc = ws.cell(label_row, col)
-        lc.value = (xs.dot_label(dot_colour, label, size=10, word_colour=xs.NOTE)
-                    if dot_colour else label)
-        lc.font = _font(size=10, color=xs.NOTE)
-        lc.alignment = Alignment(horizontal="right", vertical="bottom")
-        nc = ws.cell(number_row, col, number)
-        nc.font = _font(bold=True, size=20)
-        nc.alignment = Alignment(horizontal="right", vertical="center")
-    r = number_row + 2
-
     # Top 5 priority actions
-    c = ws.cell(r, 2, "Top 5 priority actions")
+    c = ws.cell(4, 2, "Top 5 priority actions")
+    c.font = _font(bold=True, size=12, color=xs.NAVY)
+    ws.row_dimensions[4].height = 20
+    row_by_id, _ = _finding_rows(result)
+
+    r = 5
+    for i, action in enumerate(result.top_5_priority_actions, 1):
+        clean = _clean_action(action)
+        text = f"{i}. {clean}"
+        r = _put_action_rows(ws, r, text, text, _refs_in_text(clean, result), row_by_id)
+
+    if r == 5:
+        ws.merge_cells("B5:H5")
+        c = ws.cell(5, 2, "No priority actions were produced.")
+        c.font = _font(color=xs.MUTED)
+        c.alignment = top_left
+        for col in range(2, 9):
+            ws.cell(5, col).border = line
+        r = 6
+
+    # Risks that add up: findings that are best handled together
+    if result.cross_references:
+        r += 1
+        c = ws.cell(r, 2, "Risks that add up")
+        c.font = _font(bold=True, size=12, color=xs.NAVY)
+        ws.row_dimensions[r].height = 20
+        r += 1
+        for xr in result.cross_references:
+            value, text = _risk_text(xr)
+            refs = list(dict.fromkeys(fid for fid in xr.related_findings if fid in row_by_id))
+            r = _put_action_rows(ws, r, value, text, refs, row_by_id)
+
+    # What we checked, and anything we could not analyse
+    lines = _coverage_lines(result)
+    if lines:
+        r += 1
+        for text, bold in lines:
+            ws.merge_cells(f"B{r}:H{r}")
+            c = ws.cell(r, 2, text)
+            c.font = _font(bold=bold)
+            c.alignment = top_left
+            ws.row_dimensions[r].height = max(15, 15 * _text_lines(text, 110))
+            r += 1
+
+    _put_how_to_read(ws, r + 1, result)
+
+
+def _put_how_to_read(ws, r, result: AnalysisResult) -> None:
+    """Short guide at the bottom of the front tab: severity and dots legends, one line per other tab."""
+    top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    c = ws.cell(r, 2, "How to read this workbook")
     c.font = _font(bold=True, size=12, color=xs.NAVY)
     ws.row_dimensions[r].height = 20
     r += 1
-    for i, action in enumerate(result.top_5_priority_actions, 1):
-        text = f"{i}. {_clean_action(action)}"
+
+    lines: list = [
+        _legend("How serious a finding is:  ", [xs.severity_text(sev) for sev in _SEV_ORDER]),
+        _legend("How sure we are:  ", [xs.sure_dots(level) for level in ("High", "Medium", "Low")]),
+        f"{_FINDINGS} {xs.DASH} every finding in one list, worst first. Use the arrows in the header row "
+        "to filter or sort. Folded columns on the right hold more detail; click the small + above the "
+        "column letters to open them.",
+    ]
+    if result.reconciliation:
+        lines.append(f"{_SAP_VS_US} {xs.DASH} SAP's own ratings next to ours, so you can see where we "
+                     "agree and where a second look is worthwhile.")
+    if vd.heatmap_rows(result):
+        lines.append(f"{_HEATMAP} {xs.DASH} which report sections carry which kinds of risk, coloured by "
+                     "the most serious finding.")
+    for value in lines:
         ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, text)
+        c = ws.cell(r, 2, value)
         c.font = _font()
         c.alignment = top_left
-        for col in range(2, 9):
-            ws.cell(r, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
-        ws.row_dimensions[r].height = 15 * _text_lines(text, 100)
+        ws.row_dimensions[r].height = max(15, 15 * _text_lines(value, 110))
         r += 1
 
-    r += 1
-    c = ws.cell(r, 2, "Findings by section")
-    c.font = _font(bold=True, size=12, color=xs.NAVY)
-    r += 1
 
-    # Section table
-    tbl_hdr_row = r
-    col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
-    xs.header_row(ws, tbl_hdr_row, col_headers, start_col=2, numeric_cols=(4, 5, 6, 7, 8))
+def _coverage_lines(result: AnalysisResult) -> list[tuple[str, bool]]:
+    """(text, bold) lines: how many sections we checked and found clean, and how many failed."""
+    lines: list[tuple[str, bool]] = []
+    checked = sum(1 for c in result.coverage if c.status == "analyzed")
+    if checked:
+        healthy = _healthy_sections(result)
+        text = f"We checked {checked} sections, no issues in {len(healthy)} of them"
+        sap_rating = vd.sap_rating_by_section(result.reconciliation)
+        flagged = sum(1 for c in healthy if sap_rating.get(c.section_id) in ("RED", "YELLOW"))
+        if flagged:
+            text += f" (SAP rated {flagged} red/yellow; see {_SAP_VS_US})"
+        lines.append((text + ".", False))
+    failed = sum(1 for c in result.coverage if c.status == "failed")
+    if failed:
+        lines.append((f"{failed} {'section' if failed == 1 else 'sections'} could not be analysed.", True))
+    return lines
 
-    # Worst section first: by worst severity, then most findings, then original order.
-    rows = []
-    for orig, da in enumerate(result.domain_analyses):
-        if da.section_id not in sheet_map:
+
+def _put_action_rows(ws, r, value, height_text, refs, row_by_id) -> int:
+    """Text merged across B..G, one linked finding ref per row in column H, a grey line below.
+
+    One row per ref (at least one); returns the next free row.
+    """
+    top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    k = max(1, len(refs))
+    ws.merge_cells(f"B{r}:G{r + k - 1}")
+    c = ws.cell(r, 2, value)
+    c.font = _font()
+    c.alignment = top_left
+    for n, fid in enumerate(refs):
+        rc = ws.cell(r + n, 8, fid)
+        rc.font = _font()
+        rc.alignment = top_left
+        if fid in row_by_id:
+            rc.hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
+            rc.font = _link_font()
+    for rr in range(r, r + k):
+        ws.row_dimensions[rr].height = max(15, 15 * _text_lines(height_text, 95) / k)
+    for col in range(2, 9):
+        ws.cell(r + k - 1, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+    return r + k
+
+
+def _risk_text(xr: CrossReference):
+    """Cell value (rich text when available) and plain text for one linked risk: title, why, what to do."""
+    parts = [("", xr.title, True)]
+    why = " ".join(t.strip() for t in (xr.correlation_description, xr.combined_impact) if t.strip())
+    if why:
+        parts.append(("Why it matters together: ", why, False))
+    if xr.recommended_action.strip():
+        parts.append(("What to do: ", xr.recommended_action.strip(), False))
+    text = "\n".join(label + body for label, body, _ in parts)
+    if not xs.RICH:
+        return text, text
+    blocks = []
+    for n, (label, body, bold) in enumerate(parts):
+        if n:
+            blocks.append(TextBlock(xs._inline(xs.TEXT), "\n"))
+        if label:
+            blocks.append(TextBlock(xs._inline(xs.TEXT, bold=True), label))
+        blocks.append(TextBlock(xs._inline(xs.TEXT, bold=bold), body))
+    return CellRichText(*blocks), text
+
+
+_SEV_RANK = {sev: i for i, sev in enumerate(_SEV_ORDER)}
+
+
+def _findings_in_order(result: AnalysisResult) -> list[tuple[DomainAnalysis, Finding]]:
+    """Every (section, finding) pair, worst severity first, then section order, then finding order."""
+    rows: list[tuple] = []
+    for sec_idx, da in enumerate(result.domain_analyses):
+        for f_idx, f in enumerate(da.findings):
+            rows.append((_SEV_RANK.get(f.severity, 9), sec_idx, f_idx, da, f))
+    rows.sort(key=lambda x: x[:3])
+    return [(da, f) for *_, da, f in rows]
+
+
+def _finding_rows(result: AnalysisResult) -> tuple[dict[str, int], dict[str, int]]:
+    """Row on the Findings tab for each finding id, and for the first finding of each section.
+
+    Data starts at row 2. A repeated id keeps its first row.
+    """
+    row_by_id: dict[str, int] = {}
+    first_row_by_section: dict[str, int] = {}
+    for i, (da, f) in enumerate(_findings_in_order(result)):
+        row_by_id.setdefault(f.id, 2 + i)
+        first_row_by_section.setdefault(da.section_id, 2 + i)
+    return row_by_id, first_row_by_section
+
+
+def _refs_in_text(text, result: AnalysisResult) -> list[str]:
+    """Finding ids mentioned in a text, in order of appearance, each once.
+
+    "A-F001 – A-F003" (two ids of one section joined only by a dash) also brings in the
+    findings between them. Anything that is not a real finding id is ignored.
+    """
+    position: dict[str, tuple[int, int]] = {}  # id -> (section index, finding index), first one wins
+    for sec_idx, da in enumerate(result.domain_analyses):
+        for f_idx, f in enumerate(da.findings):
+            position.setdefault(f.id, (sec_idx, f_idx))
+    if not position:
+        return []
+
+    text = str(text)
+    ids = sorted(position, key=len, reverse=True)  # longest first, so a short id never cuts a long one
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(i) for i in ids) + r")(?!\w)")
+    matches = list(pattern.finditer(text))
+
+    found: list[str] = []
+
+    def add(fid):
+        if fid not in found:
+            found.append(fid)
+
+    for n, m in enumerate(matches):
+        add(m.group())
+        nxt = matches[n + 1] if n + 1 < len(matches) else None
+        if nxt is None or text[m.end():nxt.start()].strip() not in ("–", "—", "-"):
             continue
-        worst = _worst_severity(da.findings)
-        rank = _SEV_ORDER.index(worst) if worst else len(_SEV_ORDER)
-        rows.append((rank, -len(da.findings), orig, da, worst))
-    rows.sort(key=lambda t: t[:3])
-
-    r = tbl_hdr_row + 1
-    for _rank, _n, _orig, da, worst in rows:
-        sname = sheet_map[da.section_id]
-        ref = _sheet_ref(sname)
-
-        lc = ws.cell(row=r, column=2, value=da.section_title)
-        lc.hyperlink = f"#'{sname}'!A1"
-        lc.font = _link_font()
-
-        hc = ws.cell(row=r, column=3, value=xs.severity_text(worst) if worst else xs.muted(xs.DASH))
-        hc.font = _font()
-
-        sev_col = "B"
-        data_range = f"{ref}!${sev_col}$3:${sev_col}$9999"
-        ws.cell(row=r, column=4, value=f"=COUNTA({ref}!$A$3:$A$9999)")
-        # Wildcard: the Severity cells read "● High" (dot + word).
-        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"*Critical")')
-        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"*High")')
-        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"*Medium")')
-        ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"*Low")')
-
-        for col in range(2, 9):
-            cell = ws.cell(row=r, column=col)
-            cell.border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
-            cell.alignment = Alignment(horizontal="right" if col >= 4 else "left",
-                                       vertical="top", wrap_text=True)
-            if col >= 4:
-                cell.font = _font()
-        r += 1
-
-    ws.auto_filter.ref = f"B{tbl_hdr_row}:H{max(r - 1, tbl_hdr_row)}"
+        (sec_a, idx_a), (sec_b, idx_b) = position[m.group()], position[nxt.group()]
+        if sec_a == sec_b and idx_a < idx_b:
+            for f in result.domain_analyses[sec_a].findings[idx_a + 1:idx_b]:
+                add(f.id)
+    return found
 
 
-def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
-    ws = wb.create_sheet(sheet_name)
+def _build_all_findings(wb: Workbook, result: AnalysisResult):
+    """One flat, filterable table of every finding, worst first. Detail columns are folded away."""
+    ws = wb.create_sheet(_FINDINGS)
     _apply_app_style(ws)
 
-    # Columns A (Ref.) and B (Severity) must stay first: the Executive Summary
-    # counts findings with formulas over those two columns. New columns go last.
-    # The last two columns are reviewer notes, grouped and collapsed.
-    COLS = ["Ref.", "Severity", "Title", "What it means", "What the SAP report says",
-            "Impact", "Recommended action", "SAP transactions", "Effort", "Priority",
-            "Check latest SAP guidance first?", "How sure we are", "Risk area",
-            "How to confirm", "Reviewer note: why check first", "Reviewer note: search query"]
+    COLS = [
+        "Ref.", "Severity", "Title", "What it means", "Recommended action",
+        "Priority", "Effort", "How sure we are", "Section",
+        # columns 10-19: grouped and collapsed
+        "Risk area", "What the SAP report says", "Impact", "Why", "How to confirm",
+        "SAP transactions", "Check latest SAP guidance first?", "Due date",
+        "Reviewer note: why check first", "Reviewer note: search query",
+    ]
+    _hdr_row(ws, 1, COLS)
+    ws.freeze_panes = "A2"
 
-    # Row 1: full-width back-link
-    ws.merge_cells(f"A1:{get_column_letter(len(COLS))}1")
-    bl = ws.cell(row=1, column=1, value="← Executive Summary")
-    bl.hyperlink = "#'Executive Summary'!A1"
-    bl.font = _link_font()
-    bl.alignment = _align(h="left")
-    xs.title_band(ws, 1, 1, len(COLS), size=10, bold=False, underline="single")
+    rows = _findings_in_order(result)
 
-    # Row 2: column headers
-    _hdr_row(ws, 2, COLS)
-    ws.freeze_panes = "A3"
-
-    for i, f in enumerate(da.findings):
-        r = 3 + i
+    for i, (da, f) in enumerate(rows):
+        r = 2 + i
         vals = [
-            f.id, xs.severity_text(f.severity), f.title, f.description, f.evidence,
-            f.impact, f.remediation.action,
-            ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority,
-            None, xs.sure_dots(f.confidence), ", ".join(f.risk_types), f.to_confirm,
+            f.id, xs.severity_text(f.severity), f.title, f.description, f.remediation.action,
+            f.remediation.priority, f.remediation.effort_estimate, xs.sure_dots(f.confidence),
+            da.section_title,
+            ", ".join(f.risk_types), f.evidence, f.impact, f.confidence_reason, f.to_confirm,
+            ", ".join(f.remediation.sap_transactions), None, f.due_date,
             f.remediation.validation_reason, f.remediation.validation_query,
         ]
         for col, val in enumerate(vals, 1):
             c = ws.cell(row=r, column=col, value=val)
             c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=11), f.remediation.external_validation_required)
-
-    xs.apply_table_style(ws, header=2, last_row=max(2, 2 + len(da.findings)), last_col=len(COLS))
-    _set_widths(ws, 2, len(COLS))
-    _collapse_group(ws, 15, 16)
-
-
-def _build_all_findings(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
-    """One flat, filterable table of every finding, worst first."""
-    ws = wb.create_sheet("All Findings")
-    _apply_app_style(ws)
-
-    COLS = [
-        "Ref.", "Section", "Severity", "Risk area", "Title",
-        "What the SAP report says", "What it means", "How sure we are",
-        "Why", "How to confirm", "Impact", "Recommended action",
-        "SAP transactions", "Effort", "Priority", "Due date",
-        "Check latest SAP guidance first?",
-    ]
-    _hdr_row(ws, 1, COLS)
-    ws.freeze_panes = "A2"
-
-    _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-    rows: list[tuple] = []
-    for sec_idx, da in enumerate(result.domain_analyses):
-        for f_idx, f in enumerate(da.findings):
-            rows.append((_SEV_ORDER.get(f.severity, 9), sec_idx, f_idx, da, f))
-    rows.sort(key=lambda x: (x[0], x[1], x[2]))
-
-    for i, (_, _, f_idx, da, f) in enumerate(rows):
-        r = 2 + i
-        vals = [
-            f.id, da.section_title, xs.severity_text(f.severity), ", ".join(f.risk_types), f.title,
-            f.evidence, f.description, xs.sure_dots(f.confidence),
-            f.confidence_reason, f.to_confirm, f.impact, f.remediation.action,
-            ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority, f.due_date,
-            None,
-        ]
-        for col, val in enumerate(vals, 1):
-            c = ws.cell(row=r, column=col, value=val)
-            c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=17), f.remediation.external_validation_required)
+        _guidance_cell(ws.cell(row=r, column=16), f.remediation.external_validation_required)
 
     xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
-
-    # Ref. links to the finding's row on its section sheet (after styling, which resets fonts only on borders).
-    for i, (_, _, f_idx, da, f) in enumerate(rows):
-        sname = sheet_map.get(da.section_id)
-        if sname:
-            idc = ws.cell(row=2 + i, column=1)
-            idc.hyperlink = f"#'{sname}'!A{3 + f_idx}"
-            idc.font = _link_font()
-
     _set_widths(ws, 1, len(COLS))
+    _collapse_group(ws, 10, len(COLS))
 
 
 _SAP_VS_US = "SAP vs SoftwareONE"
 
 # Results a reader should look at first: shown in bold.
 _BOLD_RESULTS = {rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK}
-_RESULT_ORDER = [rd.RESULT_AGREE, rd.RESULT_MORE, rd.RESULT_LESS, rd.RESULT_CHECK,
-                 rd.RESULT_NOT_FOUND, rd.RESULT_NOT_ANALYSED, rd.RESULT_NO_DETAIL,
-                 rd.RESULT_NO_RATING]
 
 
-def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dict[str, str],
-                     analyses: list[DomainAnalysis]):
+def _build_sap_vs_us(wb: Workbook, result: AnalysisResult):
     """SAP's own ratings next to ours: result counts on top, one row per alert/check below."""
+    rows, analyses = result.reconciliation, result.domain_analyses
     ws = wb.create_sheet(_SAP_VS_US)
     _apply_app_style(ws)
 
     findings_by_id: dict = {}
-    finding_row: dict[str, tuple[str, int]] = {}  # finding id -> (section id, row on its sheet)
     for da in analyses:
-        for i, f in enumerate(da.findings):
+        for f in da.findings:
             findings_by_id.setdefault(f.id, f)
-            finding_row.setdefault(f.id, (da.section_id, 3 + i))
+    row_by_id, _ = _finding_rows(result)
     displays = [rd.describe(row, findings_by_id) for row in rows]
 
     ws.cell(1, 1, _SAP_VS_US).font = _font(bold=True, size=16)
@@ -498,18 +417,15 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
             ).font = _font(size=10, color=xs.NOTE)
 
     # Summary block: result counts, split by Alerts and Checks.
-    seen = {d.result for d in displays}
-    results = [r for r in _RESULT_ORDER if r in seen] + sorted(seen - set(_RESULT_ORDER))
+    counts = vd.sap_result_counts(rows, analyses)
     sum_hdr = 4
     xs.header_row(ws, sum_hdr, ["Result", None, None, "Alerts", "Checks", "Total"], numeric_cols=(4, 5, 6))
-    for i, result_name in enumerate(results):
+    for i, (result_name, alerts, checks) in enumerate(counts):
         r = sum_hdr + 1 + i
-        alerts = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Alert")
-        checks = sum(1 for x, d in zip(rows, displays) if d.result == result_name and x.source == "Check")
         ws.cell(r, 1, result_name).font = _font(bold=result_name in _BOLD_RESULTS)
         for col, val in ((4, alerts), (5, checks), (6, alerts + checks)):
             ws.cell(r, col, val).font = _font()
-    sum_last = sum_hdr + len(results)
+    sum_last = sum_hdr + len(counts)
     xs.apply_table_style(ws, header=sum_hdr, last_row=sum_last, last_col=6,
                          numeric_cols=(4, 5, 6), filter=False)
     for r in range(sum_hdr + 1, sum_last + 1):  # labels run across the empty cells beside them
@@ -542,21 +458,173 @@ def _build_sap_vs_us(wb: Workbook, rows: list[ReconciliationRow], sheet_map: dic
     last = max(hdr, hdr + len(rows))
     xs.apply_table_style(ws, header=hdr, last_row=last, last_col=len(COLS))
 
-    # Links (after styling): finding -> its row on the section tab, section -> top of its tab.
+    # Link (after styling): our finding -> its row on the Findings tab.
     for i, row in enumerate(rows):
         r = hdr + 1 + i
         fid = row.finding_ids[0] if row.finding_ids else None
-        target = finding_row.get(fid) if fid else None
-        if target and sheet_map.get(target[0]) and ws.cell(r, 6).value:
-            ws.cell(r, 6).hyperlink = f"#'{sheet_map[target[0]]}'!A{target[1]}"
+        if fid in row_by_id and ws.cell(r, 6).value:
+            ws.cell(r, 6).hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
             ws.cell(r, 6).font = _link_font()
-        sname = sheet_map.get(row.our_section_id)
-        if sname and row.our_section_title:
-            ws.cell(r, 10).hyperlink = f"#'{sname}'!A1"
-            ws.cell(r, 10).font = _link_font()
 
     _set_widths(ws, hdr, len(COLS))
     _collapse_group(ws, 11, 14)
+
+
+_HEATMAP = "Risk Heatmap"
+_HEATMAP_GROUP_OVER = 25  # more section rows than this: fold them under one row per chapter
+
+
+def _heat_fill(severity):
+    colour = xs.SEVERITY_COLOURS[severity]
+    return PatternFill("solid", start_color=colour, end_color=colour)
+
+
+def _worst_of(severities):
+    present = set(severities)
+    return next((sev for sev in vd.SEVERITIES if sev in present), None)
+
+
+def _legend(label, items):
+    """One line: a plain label, then each item (coloured dots and a word) separated by spaces."""
+    if not xs.RICH:
+        return label + "   ".join(str(item) for item in items)
+    blocks = [TextBlock(xs._inline(xs.NOTE), label)]
+    for i, item in enumerate(items):
+        if i:
+            blocks.append(TextBlock(xs._inline(xs.TEXT), "    "))
+        blocks.extend(item)
+    return CellRichText(*blocks)
+
+
+def _heat_legend():
+    """One line: a coloured dot and the name for each severity."""
+    return _legend("Colour = most serious finding:  ", [xs.severity_text(sev) for sev in vd.SEVERITIES])
+
+
+def _add_cells(total: dict, cells: dict) -> None:
+    """Add {type: (count, worst severity)} into a running total, in place."""
+    for rt, (count, worst) in cells.items():
+        old_count, old_worst = total.get(rt, (0, worst))
+        total[rt] = (old_count + count, _worst_of([old_worst, worst]))
+
+
+def _build_risk_heatmap(wb: Workbook, result: AnalysisResult) -> bool:
+    """Sections down, risk types across. Number = findings, colour = most serious one.
+
+    Returns False (no sheet) when there is nothing to show.
+    """
+    rows = vd.heatmap_rows(result)
+    if not rows:
+        return False
+    types = vd.heatmap_columns(result)
+    with_sap = bool(result.reconciliation)
+    _, first_row_by_section = _finding_rows(result)
+
+    ws = wb.create_sheet(_HEATMAP)
+    _apply_app_style(ws)
+
+    first_type = 3 if with_sap else 2
+    findings_col = first_type + len(types)
+    ncols = findings_col
+    cols = ["Section"] + (["SAP rating"] if with_sap else []) + types + ["Findings"]
+
+    ws.cell(1, 1, _HEATMAP)
+    xs.title_band(ws, 1, 1, ncols)
+    ws.cell(2, 1, "Number = findings of that risk type. Colour = the most serious of them. "
+                  "A finding with two risk types counts in both.").font = _font(size=10, color=xs.NOTE)
+    _hdr_row(ws, 3, cols)
+    for col in range(first_type, ncols + 1):
+        ws.cell(3, col).alignment = _align("center", "top", True)
+    ws.freeze_panes = "A4"
+
+    def put_grid(r, cells, findings, bold=False):
+        for i, rt in enumerate(types):
+            if rt not in cells:
+                continue
+            count, worst = cells[rt]
+            c = ws.cell(r, first_type + i, count)
+            c.font = _font(bold=True, color=xs.WHITE)
+            c.fill = _heat_fill(worst)
+        ws.cell(r, findings_col, findings if findings else xs.muted(xs.DASH)).font = _font(bold=bold)
+
+    def finish_row(r):
+        for col in range(1, ncols + 1):
+            c = ws.cell(r, col)
+            c.border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
+            c.alignment = _align("center" if col >= first_type else "left", "center", wrap=(col == 1))
+
+    # Plain list, or one folded group per chapter when the list is long.
+    grouped = len(rows) > _HEATMAP_GROUP_OVER
+    layout: list[tuple[str, object]] = []  # ("chapter", (title, rows)) or ("section", HeatRow)
+    if grouped:
+        chapters: dict = {}
+        for row in rows:
+            chapters.setdefault(row.chapter, []).append(row)
+        for chapter in sorted(chapters, key=lambda ch: (ch[0] is None, ch[0] or 0)):
+            layout.append(("chapter", (chapter[1], chapters[chapter])))
+            layout.extend(("section", row) for row in chapters[chapter])
+        ws.sheet_properties.outlinePr.summaryBelow = False
+    else:
+        layout = [("section", row) for row in rows]
+
+    r = 3
+    links: list[tuple[int, int]] = []  # (heatmap row, row on the Findings tab)
+    for kind, item in layout:
+        r += 1
+        if kind == "chapter":
+            title, members = item
+            cells: dict[str, tuple[int, str]] = {}
+            for m in members:
+                _add_cells(cells, m.cells)
+            ws.cell(r, 1, title).font = _font(bold=True)
+            if with_sap:
+                ratings = [m.sap_rating for m in members if m.sap_rating]
+                best = min(ratings, key=lambda x: vd.RATING_ORDER[x], default=None)
+                ws.cell(r, 2, xs.rating_text(best)).font = _font(bold=True)
+            put_grid(r, cells, sum(m.findings for m in members), bold=True)
+            finish_row(r)
+            ws.row_dimensions[r].collapsed = True
+            continue
+        row = item
+        ws.cell(r, 1, row.title).font = _font()
+        if with_sap:
+            ws.cell(r, 2, xs.rating_text(row.sap_rating)).font = _font()
+        put_grid(r, row.cells, row.findings)
+        finish_row(r)
+        if row.section_id in first_row_by_section:
+            links.append((r, first_row_by_section[row.section_id]))
+        if grouped:
+            ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
+            ws.row_dimensions[r].outlineLevel = 1
+            ws.row_dimensions[r].hidden = True
+    for rr, findings_row in links:
+        ws.cell(rr, 1).hyperlink = f"#'{_FINDINGS}'!A{findings_row}"
+        ws.cell(rr, 1).font = _link_font()
+
+    # Total row: distinct findings per type (a finding sits in one section, so section counts add up).
+    r += 1
+    totals: dict[str, tuple[int, str]] = {}
+    for row in rows:
+        _add_cells(totals, row.cells)
+    ws.cell(r, 1, "Total").font = _font(bold=True)
+    for i, rt in enumerate(types):
+        if rt in totals:
+            ws.cell(r, first_type + i, totals[rt][0]).font = _font(bold=True)
+    ws.cell(r, findings_col, sum(row.findings for row in rows)).font = _font(bold=True)
+    finish_row(r)
+    for col in range(1, ncols + 1):
+        ws.cell(r, col).border = Border(top=Side(style="thin", color=xs.NAVY),
+                                        bottom=Side(style="thin", color=xs.ROW_LINE))
+
+    ws.cell(r + 2, 1, _heat_legend())
+
+    ws.column_dimensions["A"].width = 44
+    if with_sap:
+        ws.column_dimensions["B"].width = 14
+    for col in range(first_type, findings_col):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+    ws.column_dimensions[get_column_letter(findings_col)].width = 10
+    return True
 
 
 def _healthy_sections(result: AnalysisResult) -> list:
@@ -566,183 +634,15 @@ def _healthy_sections(result: AnalysisResult) -> list:
             if c.status == "analyzed" and c.section_id not in with_findings]
 
 
-def _has_healthy_sections(result: AnalysisResult) -> bool:
-    return bool(_healthy_sections(result))
-
-
-def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
-    """Sections we analysed and found clean. Returns False (no sheet) when none qualify."""
-    healthy = _healthy_sections(result)
-    if not healthy:
-        return False
-
-    # Worst SAP rating among Check rows that point at each section.
-    sap_rating: dict[str, str] = {}
-    for row in result.reconciliation:
-        if row.source != "Check" or row.sap_rating not in _RATING_ORDER:
-            continue
-        best = sap_rating.get(row.our_section_id)
-        if best is None or _RATING_ORDER[row.sap_rating] < _RATING_ORDER[best]:
-            sap_rating[row.our_section_id] = row.sap_rating
-
-    ws = wb.create_sheet("No Issues Found")
-    _apply_app_style(ws)
-    _hdr_row(ws, 1, ["Section", "SAP rating", "Note"])
-    ws.freeze_panes = "A2"
-
-    for i, cov in enumerate(healthy):
-        r = 2 + i
-        rating = sap_rating.get(cov.section_id, "")
-        flagged = rating in ("RED", "YELLOW")
-        ws.cell(r, 1, cov.section_title.strip() or cov.section_id).font = _font()
-        ws.cell(r, 2, xs.rating_text(rating)).font = _font()
-        ws.cell(r, 3, f"SAP flagged this {xs.DASH} please review" if flagged else None).font = _font(bold=flagged)
-
-    xs.apply_table_style(ws, header=1, last_row=1 + len(healthy), last_col=3)
-    _set_widths(ws, 1, 3)
-    return True
-
-def _build_linked_issues(wb: Workbook, xrefs: list[CrossReference], analyses: list[DomainAnalysis]):
-    """Findings that belong together, with their titles instead of bare reference numbers."""
-    ws = wb.create_sheet(_LINKED)
-    _apply_app_style(ws)
-
-    titles = {f.id: f.title for da in analyses for f in da.findings}
-    COLS = ["Title", "Related findings", "How they connect", "Combined impact", "Recommended action"]
-    _hdr_row(ws, 1, COLS)
-    ws.freeze_panes = "A2"
-
-    for i, xr in enumerate(xrefs):
-        r = 2 + i
-        related = "\n".join(f"{fid} {titles[fid]}" if fid in titles else fid
-                            for fid in xr.related_findings)
-        vals = [xr.title, related, xr.correlation_description, xr.combined_impact,
-                xr.recommended_action]
-        for col, val in enumerate(vals, 1):
-            ws.cell(row=r, column=col, value=val).font = _font()
-
-    xs.apply_table_style(ws, header=1, last_row=1 + len(xrefs), last_col=len(COLS))
-    _set_widths(ws, 1, len(COLS))
-
-
-def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
-    ws = wb.create_sheet("Action Plan")
-    _apply_app_style(ws)
-
-    COLS = [
-        "Ref.", "Section", "Severity", "Title", "Recommended action", "SAP transactions",
-        "Effort", "Priority", "Check latest SAP guidance first?",
-        "Reviewer note: why check first", "Reviewer note: search query",
-    ]
-    _hdr_row(ws, 1, COLS)
-    ws.freeze_panes = "A2"
-
-    _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-    rows: list[tuple] = []
-    for da in analyses:
-        for f in da.findings:
-            rows.append((_SEV_ORDER.get(f.severity, 9), f, da.section_title))
-    rows.sort(key=lambda x: x[0])
-
-    for i, (_, f, section_title) in enumerate(rows):
-        r = 2 + i
-        vals = [
-            f.id, section_title, xs.severity_text(f.severity), f.title,
-            f.remediation.action, ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority, None,
-            f.remediation.validation_reason, f.remediation.validation_query,
-        ]
-        for col, val in enumerate(vals, 1):
-            c = ws.cell(row=r, column=col, value=val)
-            c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=9), f.remediation.external_validation_required)
-
-    xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
-    _set_widths(ws, 1, len(COLS))
-    _collapse_group(ws, 10, 11)
-
-
-def _build_document_structure(wb: Workbook, tree: dict):
-    ws = wb.create_sheet("Document Structure")
-    _apply_app_style(ws)
-
-    _hdr_row(ws, 1, ["Title", "Pages", "Summary", "Depth"])
-    ws.freeze_panes = "A2"
-
-    row = [2]
-
-    def _walk(nodes, depth=0):
-        for n in nodes:
-            title = ("  " * depth) + n.get("title", "")
-            ps, pe = n.get("start_index", ""), n.get("end_index", "")
-            pages = f"{ps}–{pe}" if ps and pe else ""
-            summary = n.get("summary", "")
-            r = row[0]
-            ws.cell(r, 1, title).font = _font(bold=(depth == 0))
-            ws.cell(r, 2, pages).alignment = _align(h="center")
-            c = ws.cell(r, 3, summary)
-            c.font = _font()
-            c.alignment = _align(wrap=True)
-            ws.cell(r, 4, depth).font = _font()
-            row[0] += 1
-            _walk(n.get("nodes", []), depth + 1)
-
-    _walk(tree.get("structure", []))
-    _autofit_columns(ws, min_width=8, max_width=55)
-
-
-def _build_token_usage(wb: Workbook, usage: TokenUsage):
-    ws = wb.create_sheet("Token Usage")
-    _apply_app_style(ws)
-
-    _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Cached Input", "Cache Write", "Billable Input", "Output Tokens", "Total Tokens"])
-    ws.freeze_panes = "A2"
-
-    data_rows = [
-        ("Phase 0 — Planning", usage.phase0_model, usage.phase0_input_tokens, usage.phase0_cached_input_tokens, usage.phase0_cache_write_tokens, usage.phase0_output_tokens),
-        ("Phase 1 — Domain Analysis", usage.phase1_model, usage.phase1_input_tokens, usage.phase1_cached_input_tokens, usage.phase1_cache_write_tokens, usage.phase1_output_tokens),
-        ("Phase 2 — Cross-Ref+Synth", usage.phase2_model, usage.phase2_input_tokens, usage.phase2_cached_input_tokens, usage.phase2_cache_write_tokens, usage.phase2_output_tokens),
-    ]
-
-    for i, (phase, model, inp, cached_inp, cache_write, out) in enumerate(data_rows):
-        r = 2 + i
-        ws.cell(r, 1, phase).font = _font()
-        ws.cell(r, 2, model).font = _font()
-        ws.cell(r, 3, inp).number_format = _NUM
-        ws.cell(r, 4, cached_inp).number_format = _NUM
-        ws.cell(r, 5, cache_write).number_format = _NUM
-        ws.cell(r, 6, max(inp - cached_inp - cache_write, 0)).number_format = _NUM
-        ws.cell(r, 7, out).number_format = _NUM
-        c = ws.cell(r, 8, f"=C{r}+G{r}")
-        c.number_format = _NUM
-        c.font = _font()
-
-    tr = 2 + len(data_rows)
-    ws.cell(tr, 1, "TOTAL").font = _font(bold=True)
-    for col, letter in ((3, "C"), (4, "D"), (5, "E"), (6, "F"), (7, "G")):
-        c = ws.cell(tr, col, f"=SUM({letter}2:{letter}{tr-1})")
-        c.number_format = _NUM
-        c.font = _font(bold=True)
-    ws.cell(tr + 2, 1,
-        "Phase 0 tokens are not tracked — PageIndex runs via LiteLLM independently."
-    ).font = _font(italic=True, color="888888")
-
-    _autofit_columns(ws, min_width=8, max_width=40)
-
-
 # ── Final pass over every tab ─────────────────────────────────────────────────
 
-# The five front tabs get the navy tab colour; every other tab has none.
+# The four tabs get the navy tab colour.
 _FRONT_TABS = set(xs.FRONT_TABS)
-
-# Technical tabs for reviewers: kept in the file, hidden from view.
-_HIDDEN_TABS = {"Document Structure", "Token Usage", "Analysis Tasks", "Source Coverage"}
 
 def _finish_sheets(wb: Workbook) -> None:
     """Tab colour policy and print setup. Freeze panes were set by each builder."""
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = xs.NAVY if ws.title in _FRONT_TABS else None
-        ws.sheet_state = "hidden" if ws.title in _HIDDEN_TABS else "visible"
         freeze = ws.freeze_panes
         header_row = int("".join(ch for ch in freeze if ch.isdigit())) - 1 if freeze else None
         xs.apply_print_setup(ws, repeat_row=header_row or None)
@@ -750,77 +650,18 @@ def _finish_sheets(wb: Workbook) -> None:
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None) -> None:
+    # `tree` is accepted for older callers and not used: the workbook has no document-structure tab.
     wb = xs.init_workbook()
     wb.remove(wb.active)
 
-    _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
-
-    sheet_map: dict[str, str] = {}
-    used: set[str] = {_HOW_TO_READ, "Executive Summary", "All Findings", _LINKED, "Action Plan", "Document Structure",
-                      "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found"}
-    for da in result.domain_analyses:
-        if not da.findings:
-            continue
-        clean = da.section_title.translate(_ILLEGAL_SHEET).strip()[:31] or "Section"
-        base, suffix, name = clean, 1, clean
-        while name in used:
-            name = f"{base[:28]}_{suffix}"
-            suffix += 1
-        sheet_map[da.section_id] = name
-        used.add(name)
-
-    _build_how_to_read(wb, {
-        _SAP_VS_US if result.reconciliation else "",
-        "No Issues Found" if _has_healthy_sections(result) else "",
-        _LINKED if result.cross_references else "",
-    })
-    _build_executive_summary(wb, result, sheet_map)
-    _build_all_findings(wb, result, sheet_map)
+    _build_priority_actions(wb, result)
+    _build_all_findings(wb, result)
     if result.reconciliation:
-        _build_sap_vs_us(wb, result.reconciliation, sheet_map, result.domain_analyses)
-    if result.coverage:
-        _build_verified_healthy(wb, result)
-    for da in result.domain_analyses:
-        if da.section_id in sheet_map:
-            _build_section_sheet(wb, da, sheet_map[da.section_id])
-    if result.cross_references:
-        _build_linked_issues(wb, result.cross_references, result.domain_analyses)
-    _build_remediation_plan(wb, result.domain_analyses)
-    if tree:
-        _build_document_structure(wb, tree)
-    _build_token_usage(wb, result.token_usage)
-    if result.analysis_tasks:
-        ws = wb.create_sheet("Analysis Tasks")
-        _apply_app_style(ws)
-        _hdr_row(ws, 1, ["Task ID", "Title", "Owned Source IDs", "Context IDs", "Source Characters",
-                         "Context Characters", "Origin", "Within Budget"])
-        for row, task in enumerate(result.analysis_tasks, 2):
-            values = [task.task_id, task.title, ", ".join(task.source_section_ids),
-                      ", ".join(task.context_section_ids), task.source_content_chars,
-                      task.context_content_chars, task.origin, "Yes" if task.within_budget else "No"]
-            for col, value in enumerate(values, 1):
-                cell = ws.cell(row, col, value)
-                if isinstance(value, str):
-                    cell.data_type = "s"
-                cell.alignment = _align(wrap=True)
-        ws.freeze_panes = "A2"
-        _autofit_columns(ws, min_width=10, max_width=55)
-    if result.coverage:
-        ws = wb.create_sheet("Source Coverage")
-        _apply_app_style(ws)
-        _hdr_row(ws, 1, ["Source ID", "Title", "Task ID", "Status", "Reason"])
-        for row, source in enumerate(result.coverage, 2):
-            for col, value in enumerate([source.section_id, source.section_title, source.analysis_task_id,
-                                         source.status, source.reason], 1):
-                cell = ws.cell(row, col, value)
-                cell.data_type = "s"
-                cell.alignment = _align(wrap=True)
-        ws.freeze_panes = "A2"
-        _autofit_columns(ws, min_width=10, max_width=55)
-
+        _build_sap_vs_us(wb, result)
+    _build_risk_heatmap(wb, result)
     _finish_sheets(wb)
 
-    # Open on "How to read this workbook" (the first tab)
+    # Open on Priority Actions (the first tab)
     wb.active = 0
     for i, ws in enumerate(wb.worksheets):
         ws.sheet_view.tabSelected = (i == 0)

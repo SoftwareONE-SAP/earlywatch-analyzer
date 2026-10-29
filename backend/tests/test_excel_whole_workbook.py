@@ -1,6 +1,7 @@
 """Whole-workbook checks for the polished minimal look: navy frame only, one font, plain view."""
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText
 
+from ewa_pipeline.report import excel_style as xs
 from ewa_pipeline.report.excel_generator import generate
 from ewa_pipeline.report.schemas import (
     AnalysisTaskRecord, CrossReference, ReconciliationRow, SectionCoverage, SystemProfile,
@@ -22,6 +24,7 @@ def full_result():
     """A result that makes every tab appear."""
     result = build_result()
     result.executive_summary = "Two things need attention."
+    result.top_5_priority_actions = ["Tune the statement (F-002) and patch the kernel (F-001)."]
     result.system_profile = SystemProfile(sid="PRD", product="SAP S/4HANA", product_version="2022",
                                           period_start="01.05.2026", period_end="31.05.2026")
     result.cross_references = [CrossReference(
@@ -58,24 +61,21 @@ class WholeWorkbookStyleTests(unittest.TestCase):
             cls.wb = load_workbook(path, rich_text=True)
 
     def test_every_expected_tab_is_present(self):
-        names = self.wb.sheetnames
-        for name in ("How to read this workbook", "Executive Summary", "All Findings", "SAP vs SoftwareONE",
-                     "No Issues Found", "Linked Issues", "Action Plan", "Document Structure",
-                     "Token Usage", "Analysis Tasks", "Source Coverage"):
-            self.assertIn(name, names)
+        self.assertEqual(self.wb.sheetnames,
+                         ["Priority Actions", "Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
+        for ws in self.wb.worksheets:  # the `tree` passed to generate() adds nothing
+            self.assertEqual(ws.sheet_state, "visible", ws.title)
 
     def _navy_rows(self, ws):
         """Title-band rows and table-header rows: the only rows allowed to have a fill."""
         rows = set()
-        if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE"):
+        if ws.title in ("Priority Actions", "SAP vs SoftwareONE", "Risk Heatmap"):
             rows.add(1)
-        if str(ws["A1"].value).startswith("←"):
-            rows.add(1)  # back-link band on section tabs
         if ws.freeze_panes:
             rows.add(ws[ws.freeze_panes].row - 1)  # main table header
         for row in ws.iter_rows():
             values = [c.value for c in row if c.value is not None]
-            if "Worst severity" in values or "Alerts" in values:  # Exec Summary / SAP vs Us tables
+            if "Alerts" in values:  # SAP vs Us summary table
                 rows.add(row[0].row)
         return rows
 
@@ -87,6 +87,10 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                 if cell.fill.fill_type in (None, ""):
                     continue
                 self.assertEqual(cell.fill.fill_type, "solid", where)
+                if ws.title == "Risk Heatmap" and cell.row not in navy_rows:
+                    # deliberate heatmap exception: grid cells are filled with the severity colours
+                    self.assertIn(cell.fill.start_color.rgb[-6:], xs.SEVERITY_COLOURS.values(), where)
+                    continue
                 self.assertEqual(cell.fill.start_color.rgb[-6:], "1F3864", where)
                 self.assertIn(cell.row, navy_rows, where)
 
@@ -100,8 +104,14 @@ class WholeWorkbookStyleTests(unittest.TestCase):
         for ws in self.wb.worksheets:
             navy_rows = self._navy_rows(ws)
             for cell in ws._cells.values():
-                if cell.row not in navy_rows:
-                    self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
+                if cell.row in navy_rows:
+                    continue
+                if ws.title == "Risk Heatmap" and cell.fill.fill_type == "solid":
+                    # deliberate heatmap exception: only the severity colours may fill a body cell
+                    self.assertIn(cell.fill.start_color.rgb[-6:], xs.SEVERITY_COLOURS.values(),
+                                  f"{ws.title}!{cell.coordinate}")
+                    continue
+                self.assertIn(cell.fill.fill_type, (None, ""), f"{ws.title}!{cell.coordinate}")
 
     def test_every_font_is_aptos_including_rich_text_runs(self):
         for ws in self.wb.worksheets:
@@ -129,6 +139,49 @@ class WholeWorkbookStyleTests(unittest.TestCase):
             self.assertEqual(ws.page_setup.orientation, "landscape", ws.title)
             self.assertEqual(int(ws.page_setup.paperSize), 9, ws.title)
             self.assertEqual(ws.page_setup.fitToWidth, 1, ws.title)
+
+    def test_every_internal_link_lands_on_an_existing_sheet_and_row(self):
+        finding_ids = {f.id for da in full_result().domain_analyses for f in da.findings}
+        for ws in self.wb.worksheets:
+            for cell in ws._cells.values():
+                link = cell.hyperlink
+                target = (link.target or link.location or "") if link else ""
+                if not target.startswith("#"):
+                    continue
+                where = f"{ws.title}!{cell.coordinate}"
+                m = re.fullmatch(r"#'(.+)'!([A-Z]+)(\d+)", target)
+                self.assertIsNotNone(m, f"{where}: {target}")
+                self.assertIn(m.group(1), self.wb.sheetnames, where)
+                self.assertLessEqual(int(m.group(3)), self.wb[m.group(1)].max_row, where)
+                if m.group(1) == "Findings":  # a link into Findings lands on a finding's row
+                    self.assertIn(self.wb["Findings"][f"A{m.group(3)}"].value, finding_ids, where)
+
+
+class ExactTabListTests(unittest.TestCase):
+    def _names(self, result):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(result, path)
+            wb = load_workbook(path)
+        self.assertEqual([ws.title for ws in wb.worksheets if ws.sheet_state != "visible"], [])
+        self.assertEqual(wb.active.title, "Priority Actions")
+        return wb.sheetnames
+
+    def test_full_sample_has_exactly_four_tabs(self):
+        self.assertEqual(self._names(full_result()),
+                         ["Priority Actions", "Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
+
+    def test_no_sap_data_means_no_sap_vs_softwareone_tab(self):
+        result = full_result()
+        result.reconciliation = []
+        self.assertEqual(self._names(result), ["Priority Actions", "Findings", "Risk Heatmap"])
+
+    def test_no_findings_and_no_sap_data_leaves_two_tabs(self):
+        result = full_result()
+        result.reconciliation = []
+        for da in result.domain_analyses:
+            da.findings = []
+        self.assertEqual(self._names(result), ["Priority Actions", "Findings"])
 
 
 if __name__ == "__main__":

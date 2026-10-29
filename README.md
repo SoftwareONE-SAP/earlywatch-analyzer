@@ -212,8 +212,11 @@ Python validates unique ownership, splits groups by source count/content limits,
 and backfills omitted sources by hierarchy. Each response must identify every
 owned source separately. Oversized individual sources fail explicitly without
 truncation or model calls. Usage is charged once per grouped request. Workbooks
-retain per-source findings and include Analysis Tasks and Source Coverage sheets;
-partial section coverage is marked Unknown and zero successful sections fail.
+have four tabs: Priority Actions, Findings, SAP vs SoftwareONE (only when SAP data
+exists) and Risk Heatmap (only when there is something to show). Findings keeps
+every per-source finding. Sections that could not be analysed show as a line on
+Priority Actions; the task and coverage details stay in the saved result JSON.
+Partial section coverage is marked Unknown and zero successful sections fail.
 
 See [the October 19 grouping deployment record](deployment/cli-grouping-20261019.md)
 for the current values, verification, and source/image provenance.
