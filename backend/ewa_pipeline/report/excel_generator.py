@@ -131,8 +131,6 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     if _SAP_VS_US in tabs:
         add(f"{_SAP_VS_US} " + xs.DASH + " SAP's own ratings next to ours, so you can see where we agree "
             "and where a second look is worthwhile.")
-    if "No Issues Found" in tabs:
-        add("No Issues Found " + xs.DASH + " report sections we checked and found clean.")
     if _HEATMAP in tabs:
         add(f"{_HEATMAP} " + xs.DASH + " which report sections carry which kinds of risk, coloured by "
             "the most serious finding.")
@@ -254,6 +252,36 @@ def _build_priority_actions(wb: Workbook, result: AnalysisResult):
             value, text = _risk_text(xr)
             refs = list(dict.fromkeys(fid for fid in xr.related_findings if fid in row_by_id))
             r = _put_action_rows(ws, r, value, text, refs, row_by_id)
+
+    # What we checked, and anything we could not analyse
+    lines = _coverage_lines(result)
+    if lines:
+        r += 1
+        for text, bold in lines:
+            ws.merge_cells(f"B{r}:H{r}")
+            c = ws.cell(r, 2, text)
+            c.font = _font(bold=bold)
+            c.alignment = top_left
+            ws.row_dimensions[r].height = max(15, 15 * _text_lines(text, 110))
+            r += 1
+
+
+def _coverage_lines(result: AnalysisResult) -> list[tuple[str, bool]]:
+    """(text, bold) lines: how many sections we checked and found clean, and how many failed."""
+    lines: list[tuple[str, bool]] = []
+    checked = sum(1 for c in result.coverage if c.status == "analyzed")
+    if checked:
+        healthy = _healthy_sections(result)
+        text = f"We checked {checked} sections, no issues in {len(healthy)} of them"
+        sap_rating = vd.sap_rating_by_section(result.reconciliation)
+        flagged = sum(1 for c in healthy if sap_rating.get(c.section_id) in ("RED", "YELLOW"))
+        if flagged:
+            text += f" (SAP rated {flagged} red/yellow; see {_SAP_VS_US})"
+        lines.append((text + ".", False))
+    failed = sum(1 for c in result.coverage if c.status == "failed")
+    if failed:
+        lines.append((f"{failed} {'section' if failed == 1 else 'sections'} could not be analysed.", True))
+    return lines
 
 
 def _put_action_rows(ws, r, value, height_text, refs, row_by_id) -> int:
@@ -642,35 +670,6 @@ def _healthy_sections(result: AnalysisResult) -> list:
             if c.status == "analyzed" and c.section_id not in with_findings]
 
 
-def _has_healthy_sections(result: AnalysisResult) -> bool:
-    return bool(_healthy_sections(result))
-
-
-def _build_verified_healthy(wb: Workbook, result: AnalysisResult) -> bool:
-    """Sections we analysed and found clean. Returns False (no sheet) when none qualify."""
-    healthy = _healthy_sections(result)
-    if not healthy:
-        return False
-
-    sap_rating = vd.sap_rating_by_section(result.reconciliation)
-
-    ws = wb.create_sheet("No Issues Found")
-    _apply_app_style(ws)
-    _hdr_row(ws, 1, ["Section", "SAP rating", "Note"])
-    ws.freeze_panes = "A2"
-
-    for i, cov in enumerate(healthy):
-        r = 2 + i
-        rating = sap_rating.get(cov.section_id, "")
-        flagged = rating in ("RED", "YELLOW")
-        ws.cell(r, 1, cov.section_title.strip() or cov.section_id).font = _font()
-        ws.cell(r, 2, xs.rating_text(rating)).font = _font()
-        ws.cell(r, 3, f"SAP flagged this {xs.DASH} please review" if flagged else None).font = _font(bold=flagged)
-
-    xs.apply_table_style(ws, header=1, last_row=1 + len(healthy), last_col=3)
-    _set_widths(ws, 1, 3)
-    return True
-
 def _build_document_structure(wb: Workbook, tree: dict):
     ws = wb.create_sheet("Document Structure")
     _apply_app_style(ws)
@@ -764,15 +763,12 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
 
     _build_how_to_read(wb, {
         _SAP_VS_US if result.reconciliation else "",
-        "No Issues Found" if _has_healthy_sections(result) else "",
         _HEATMAP if vd.heatmap_rows(result) else "",
     })
     _build_priority_actions(wb, result)
     _build_all_findings(wb, result)
     if result.reconciliation:
         _build_sap_vs_us(wb, result)
-    if result.coverage:
-        _build_verified_healthy(wb, result)
     _build_risk_heatmap(wb, result)
     if tree:
         _build_document_structure(wb, tree)

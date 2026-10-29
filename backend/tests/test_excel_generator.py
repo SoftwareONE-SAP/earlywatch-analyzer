@@ -319,48 +319,18 @@ class SapVsUsTests(unittest.TestCase):
                     for jargon in ("Decision", "p=", "overlap"):
                         self.assertNotIn(jargon, str(cell.value), cell.coordinate)
 
-    def test_verified_healthy_rows_and_sap_disagrees(self):
-        result = build_result()  # sections "1" and "2" have findings
-        result.coverage = [
-            SectionCoverage(section_id="1", section_title="Software Configuration", status="analyzed"),
-            SectionCoverage(section_id="3", section_title="Hardware", status="analyzed"),
-            SectionCoverage(section_id="4", section_title="Database", status="analyzed"),
-            SectionCoverage(section_id="5", section_title="Security", status="failed"),
-        ]
-        result.reconciliation = [
-            _row("Check", "Not covered", sap_topic="Database", sap_rating="YELLOW", our_section_id="4"),
-            _row("Check", "Agree", sap_topic="Database", sap_rating="RED", our_section_id="4"),
-        ]
-        wb = self._generate(result)
-        ws = wb["No Issues Found"]
-        self.assertEqual(ws.max_row, 3)  # header + 2 healthy sections
-        flag = "SAP flagged this — please review"
-        rows = {ws.cell(r, 1).value: (ws.cell(r, 2).value, ws.cell(r, 3).value) for r in (2, 3)}
-        self.assertEqual(rows["Hardware"], ("—", None))  # no SAP rating: muted dash, no note
-        self.assertEqual(rows["Database"], ("● Red", flag))
-        self.assertEqual(sum(1 for _, n in rows.values() if n == flag), 1)
-        for r in (2, 3):
-            self.assertIn(ws.cell(r, 2).fill.fill_type, (None, ""))
-        self.assertNotIn("disagrees", " ".join(str(c.value) for row in ws.iter_rows() for c in row))
-
     def test_both_sheets_ordered_when_both_present(self):
         result = build_result()
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:5], ["Findings", "SAP vs SoftwareONE", "No Issues Found"])
+        self.assertEqual(names[2:4], ["Findings", "SAP vs SoftwareONE"])
+        self.assertNotIn("No Issues Found", names)
 
-    def test_old_payload_has_neither_sheet(self):
+    def test_old_payload_has_no_sap_sheet(self):
         wb = self._generate(build_result())
-        self.assertNotIn("Verified Healthy", wb.sheetnames)
         self.assertNotIn("SAP vs SoftwareONE", wb.sheetnames)
         self.assertNotIn("No Issues Found", wb.sheetnames)
-
-    def test_coverage_without_healthy_sections_skips_sheet(self):
-        result = build_result()
-        result.coverage = [SectionCoverage(section_id="1", section_title="Software Configuration",
-                                           status="analyzed")]
-        self.assertNotIn("No Issues Found", self._generate(result).sheetnames)
 
 
 class MinimalReportBaseStyleTests(unittest.TestCase):
@@ -397,7 +367,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
 
     def test_only_front_tabs_have_navy_tab_colour(self):
         front = {"How to read this workbook", "Priority Actions", "Findings",
-                 "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"}
+                 "SAP vs SoftwareONE", "Risk Heatmap"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
             if ws.title in front:
@@ -552,6 +522,52 @@ class PriorityActionsTests(unittest.TestCase):
             generate(self._risk_result(), path)
             self.assertNotIn("Linked Issues", load_workbook(path).sheetnames)
 
+    def _coverage_result(self):
+        result = build_result()  # sections "1" and "2" have findings
+        result.coverage = [
+            SectionCoverage(section_id="1", section_title="Software Configuration", status="analyzed"),
+            SectionCoverage(section_id="2", section_title="Performance Indicators", status="analyzed"),
+            SectionCoverage(section_id="3", section_title="Hardware", status="analyzed"),
+            SectionCoverage(section_id="4", section_title="Database", status="analyzed"),
+            SectionCoverage(section_id="5", section_title="Security", status="failed"),
+        ]
+        return result
+
+    def test_checked_line_counts_clean_sections_and_sap_flags(self):
+        result = self._coverage_result()
+        result.reconciliation = [
+            _row("Check", "Not covered", sap_topic="Database", sap_rating="YELLOW", our_section_id="4"),
+            _row("Check", "Agree", sap_topic="Hardware", sap_rating="GREEN", our_section_id="3"),
+        ]
+        texts = self._texts(self._sheet(result))
+        self.assertIn("We checked 4 sections, no issues in 2 of them "
+                      "(SAP rated 1 red/yellow; see SAP vs SoftwareONE).", texts)
+
+    def test_checked_line_drops_the_sap_part_without_sap_flags(self):
+        texts = self._texts(self._sheet(self._coverage_result()))
+        self.assertIn("We checked 4 sections, no issues in 2 of them.", texts)
+
+    def test_failed_sections_get_a_bold_line(self):
+        ws = self._sheet(self._coverage_result())
+        cell = next(c for row in ws.iter_rows() for c in row
+                    if c.value == "1 section could not be analysed.")
+        self.assertTrue(cell.font.b)
+        result = self._coverage_result()
+        result.coverage[0].status = "failed"
+        self.assertIn("2 sections could not be analysed.", self._texts(self._sheet(result)))
+
+    def test_no_coverage_means_no_checked_or_failed_line(self):
+        texts = " ".join(self._texts(self._sheet(build_result())))
+        self.assertNotIn("We checked", texts)
+        self.assertNotIn("could not be analysed", texts)
+
+    def test_all_sections_failed_shows_only_the_failed_line(self):
+        result = build_result()
+        result.coverage = [SectionCoverage(section_id="5", section_title="Security", status="failed")]
+        texts = self._texts(self._sheet(result))
+        self.assertIn("1 section could not be analysed.", texts)
+        self.assertFalse(any(t.startswith("We checked") for t in texts))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -674,9 +690,9 @@ class RiskHeatmapTests(unittest.TestCase):
             da.findings = []
         self.assertNotIn("Risk Heatmap", self._generate(result).sheetnames)
 
-    def test_tab_position_after_no_issues_found(self):
+    def test_tab_position_after_sap_vs_softwareone(self):
         result = build_result()
         result.coverage = [SectionCoverage(section_id="9", section_title="Clean", status="analyzed")]
         result.reconciliation = [_row("Check", "Agree", sap_rating="GREEN")]
         names = self._generate(result).sheetnames
-        self.assertEqual(names[2:6], ["Findings", "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"])
+        self.assertEqual(names[2:5], ["Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
