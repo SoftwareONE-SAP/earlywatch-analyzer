@@ -61,11 +61,10 @@ class WholeWorkbookStyleTests(unittest.TestCase):
             cls.wb = load_workbook(path, rich_text=True)
 
     def test_every_expected_tab_is_present(self):
-        names = self.wb.sheetnames
-        for name in ("Priority Actions", "Findings", "SAP vs SoftwareONE",
-                     "Risk Heatmap", "Document Structure",
-                     "Token Usage", "Analysis Tasks", "Source Coverage"):
-            self.assertIn(name, names)
+        self.assertEqual(self.wb.sheetnames,
+                         ["Priority Actions", "Findings", "SAP vs SoftwareONE", "Risk Heatmap"])
+        for ws in self.wb.worksheets:  # the `tree` passed to generate() adds nothing
+            self.assertEqual(ws.sheet_state, "visible", ws.title)
 
     def _navy_rows(self, ws):
         """Title-band rows and table-header rows: the only rows allowed to have a fill."""

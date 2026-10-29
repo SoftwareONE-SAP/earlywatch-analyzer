@@ -640,87 +640,15 @@ def _healthy_sections(result: AnalysisResult) -> list:
             if c.status == "analyzed" and c.section_id not in with_findings]
 
 
-def _build_document_structure(wb: Workbook, tree: dict):
-    ws = wb.create_sheet("Document Structure")
-    _apply_app_style(ws)
-
-    _hdr_row(ws, 1, ["Title", "Pages", "Summary", "Depth"])
-    ws.freeze_panes = "A2"
-
-    row = [2]
-
-    def _walk(nodes, depth=0):
-        for n in nodes:
-            title = ("  " * depth) + n.get("title", "")
-            ps, pe = n.get("start_index", ""), n.get("end_index", "")
-            pages = f"{ps}–{pe}" if ps and pe else ""
-            summary = n.get("summary", "")
-            r = row[0]
-            ws.cell(r, 1, title).font = _font(bold=(depth == 0))
-            ws.cell(r, 2, pages).alignment = _align(h="center")
-            c = ws.cell(r, 3, summary)
-            c.font = _font()
-            c.alignment = _align(wrap=True)
-            ws.cell(r, 4, depth).font = _font()
-            row[0] += 1
-            _walk(n.get("nodes", []), depth + 1)
-
-    _walk(tree.get("structure", []))
-    _autofit_columns(ws, min_width=8, max_width=55)
-
-
-def _build_token_usage(wb: Workbook, usage: TokenUsage):
-    ws = wb.create_sheet("Token Usage")
-    _apply_app_style(ws)
-
-    _hdr_row(ws, 1, ["Phase", "Model", "Input Tokens", "Cached Input", "Cache Write", "Billable Input", "Output Tokens", "Total Tokens"])
-    ws.freeze_panes = "A2"
-
-    data_rows = [
-        ("Phase 0 — Planning", usage.phase0_model, usage.phase0_input_tokens, usage.phase0_cached_input_tokens, usage.phase0_cache_write_tokens, usage.phase0_output_tokens),
-        ("Phase 1 — Domain Analysis", usage.phase1_model, usage.phase1_input_tokens, usage.phase1_cached_input_tokens, usage.phase1_cache_write_tokens, usage.phase1_output_tokens),
-        ("Phase 2 — Cross-Ref+Synth", usage.phase2_model, usage.phase2_input_tokens, usage.phase2_cached_input_tokens, usage.phase2_cache_write_tokens, usage.phase2_output_tokens),
-    ]
-
-    for i, (phase, model, inp, cached_inp, cache_write, out) in enumerate(data_rows):
-        r = 2 + i
-        ws.cell(r, 1, phase).font = _font()
-        ws.cell(r, 2, model).font = _font()
-        ws.cell(r, 3, inp).number_format = _NUM
-        ws.cell(r, 4, cached_inp).number_format = _NUM
-        ws.cell(r, 5, cache_write).number_format = _NUM
-        ws.cell(r, 6, max(inp - cached_inp - cache_write, 0)).number_format = _NUM
-        ws.cell(r, 7, out).number_format = _NUM
-        c = ws.cell(r, 8, f"=C{r}+G{r}")
-        c.number_format = _NUM
-        c.font = _font()
-
-    tr = 2 + len(data_rows)
-    ws.cell(tr, 1, "TOTAL").font = _font(bold=True)
-    for col, letter in ((3, "C"), (4, "D"), (5, "E"), (6, "F"), (7, "G")):
-        c = ws.cell(tr, col, f"=SUM({letter}2:{letter}{tr-1})")
-        c.number_format = _NUM
-        c.font = _font(bold=True)
-    ws.cell(tr + 2, 1,
-        "Phase 0 tokens are not tracked — PageIndex runs via LiteLLM independently."
-    ).font = _font(italic=True, color="888888")
-
-    _autofit_columns(ws, min_width=8, max_width=40)
-
-
 # ── Final pass over every tab ─────────────────────────────────────────────────
 
 # The five front tabs get the navy tab colour; every other tab has none.
 _FRONT_TABS = set(xs.FRONT_TABS)
 
-# Technical tabs for reviewers: kept in the file, hidden from view.
-_HIDDEN_TABS = {"Document Structure", "Token Usage", "Analysis Tasks", "Source Coverage"}
-
 def _finish_sheets(wb: Workbook) -> None:
     """Tab colour policy and print setup. Freeze panes were set by each builder."""
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = xs.NAVY if ws.title in _FRONT_TABS else None
-        ws.sheet_state = "hidden" if ws.title in _HIDDEN_TABS else "visible"
         freeze = ws.freeze_panes
         header_row = int("".join(ch for ch in freeze if ch.isdigit())) - 1 if freeze else None
         xs.apply_print_setup(ws, repeat_row=header_row or None)
@@ -728,6 +656,7 @@ def _finish_sheets(wb: Workbook) -> None:
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None) -> None:
+    # `tree` is accepted for older callers and not used: the workbook has no document-structure tab.
     wb = xs.init_workbook()
     wb.remove(wb.active)
 
@@ -736,38 +665,6 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     if result.reconciliation:
         _build_sap_vs_us(wb, result)
     _build_risk_heatmap(wb, result)
-    if tree:
-        _build_document_structure(wb, tree)
-    _build_token_usage(wb, result.token_usage)
-    if result.analysis_tasks:
-        ws = wb.create_sheet("Analysis Tasks")
-        _apply_app_style(ws)
-        _hdr_row(ws, 1, ["Task ID", "Title", "Owned Source IDs", "Context IDs", "Source Characters",
-                         "Context Characters", "Origin", "Within Budget"])
-        for row, task in enumerate(result.analysis_tasks, 2):
-            values = [task.task_id, task.title, ", ".join(task.source_section_ids),
-                      ", ".join(task.context_section_ids), task.source_content_chars,
-                      task.context_content_chars, task.origin, "Yes" if task.within_budget else "No"]
-            for col, value in enumerate(values, 1):
-                cell = ws.cell(row, col, value)
-                if isinstance(value, str):
-                    cell.data_type = "s"
-                cell.alignment = _align(wrap=True)
-        ws.freeze_panes = "A2"
-        _autofit_columns(ws, min_width=10, max_width=55)
-    if result.coverage:
-        ws = wb.create_sheet("Source Coverage")
-        _apply_app_style(ws)
-        _hdr_row(ws, 1, ["Source ID", "Title", "Task ID", "Status", "Reason"])
-        for row, source in enumerate(result.coverage, 2):
-            for col, value in enumerate([source.section_id, source.section_title, source.analysis_task_id,
-                                         source.status, source.reason], 1):
-                cell = ws.cell(row, col, value)
-                cell.data_type = "s"
-                cell.alignment = _align(wrap=True)
-        ws.freeze_panes = "A2"
-        _autofit_columns(ws, min_width=10, max_width=55)
-
     _finish_sheets(wb)
 
     # Open on Priority Actions (the first tab)

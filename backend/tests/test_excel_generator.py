@@ -99,8 +99,7 @@ class ExcelGeneratorTests(unittest.TestCase):
         self.assertEqual(names[0], "Priority Actions")
         self.assertEqual(names[1], "Findings")
         self.assertNotIn("How to read this workbook", names)
-        self.assertIn("Token Usage", names)
-        for gone in ("Software Configuration", "Performance Indicators", "Action Plan"):
+        for gone in ("Software Configuration", "Performance Indicators", "Action Plan", "Token Usage"):
             self.assertNotIn(gone, names)
 
     def test_findings_rows_sorted_by_severity(self):
@@ -175,10 +174,11 @@ class ExcelGeneratorTests(unittest.TestCase):
         selected = [ws.title for ws in self.wb.worksheets if ws.sheet_view.tabSelected]
         self.assertEqual(selected, ["Priority Actions"])
 
-    def test_technical_tabs_are_hidden_and_the_rest_visible(self):
-        self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
-        for name in ("Priority Actions", "Findings"):
-            self.assertEqual(self.wb[name].sheet_state, "visible", name)
+    def test_no_tab_is_hidden_and_there_are_no_technical_tabs(self):
+        for ws in self.wb.worksheets:
+            self.assertEqual(ws.sheet_state, "visible", ws.title)
+        for gone in ("Document Structure", "Token Usage", "Analysis Tasks", "Source Coverage"):
+            self.assertNotIn(gone, self.wb.sheetnames)
 
 
 def _finding(fid: str, severity: str) -> Finding:

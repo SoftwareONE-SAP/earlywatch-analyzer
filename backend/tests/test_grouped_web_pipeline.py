@@ -138,10 +138,11 @@ class GroupedWebPipelineTests(unittest.TestCase):
             persisted = json.loads(artifacts.result_path.read_text(encoding="utf-8"))
             self.assertEqual(len(persisted["coverage"]), 2)
             workbook = load_workbook(artifacts.output_path)
-            self.assertIn("Analysis Tasks", workbook.sheetnames)
-            self.assertIn("Source Coverage", workbook.sheetnames)
-            self.assertEqual(workbook["Analysis Tasks"]["C2"].value, "0002, 0003")
-            self.assertEqual(workbook["Source Coverage"]["A3"].value, "0003")
+            self.assertNotIn("Analysis Tasks", workbook.sheetnames)
+            self.assertNotIn("Source Coverage", workbook.sheetnames)
+            front = [str(c.value) for row in workbook["Priority Actions"].iter_rows() for c in row
+                     if c.value is not None]
+            self.assertFalse(any("could not be analysed" in text for text in front))
             workbook.close()
 
     def test_service_summary_chapter_is_never_sent_to_analysts(self):
@@ -188,7 +189,9 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual([source.status for source in result.coverage], ["analyzed", "failed"])
             workbook = load_workbook(artifacts.output_path)
             self.assertIn("UNKNOWN", workbook["Priority Actions"]["B2"].value)
-            self.assertEqual(workbook["Source Coverage"]["D3"].value, "failed")
+            front = [str(c.value) for row in workbook["Priority Actions"].iter_rows() for c in row
+                     if c.value is not None]
+            self.assertIn("1 section could not be analysed.", front)
             workbook.close()
 
     def test_duplicate_unknown_or_failed_group_cannot_publish_healthy_result(self):
