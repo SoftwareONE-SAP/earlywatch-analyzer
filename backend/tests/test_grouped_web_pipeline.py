@@ -187,7 +187,7 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(result.overall_system_health, "Unknown")
             self.assertEqual([source.status for source in result.coverage], ["analyzed", "failed"])
             workbook = load_workbook(artifacts.output_path)
-            self.assertIn("UNKNOWN", workbook["Executive Summary"]["B2"].value)
+            self.assertIn("UNKNOWN", workbook["Priority Actions"]["B2"].value)
             self.assertEqual(workbook["Source Coverage"]["D3"].value, "failed")
             workbook.close()
 

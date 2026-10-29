@@ -94,10 +94,10 @@ class ExcelGeneratorTests(unittest.TestCase):
         generate(build_result(), path)
         self.wb = load_workbook(path)
 
-    def test_findings_follows_executive_summary(self):
+    def test_findings_follows_priority_actions(self):
         names = self.wb.sheetnames
         self.assertEqual(names[0], "How to read this workbook")
-        self.assertEqual(names[1], "Executive Summary")
+        self.assertEqual(names[1], "Priority Actions")
         self.assertEqual(names[2], "Findings")
         self.assertIn("Token Usage", names)
         for gone in ("Software Configuration", "Performance Indicators", "Action Plan"):
@@ -182,7 +182,7 @@ class ExcelGeneratorTests(unittest.TestCase):
 
     def test_technical_tabs_are_hidden_and_the_rest_visible(self):
         self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
-        for name in ("How to read this workbook", "Executive Summary", "Findings"):
+        for name in ("How to read this workbook", "Priority Actions", "Findings"):
             self.assertEqual(self.wb[name].sheet_state, "visible", name)
 
 
@@ -272,7 +272,7 @@ class SapVsUsTests(unittest.TestCase):
         ]
         wb = self._generate(result)
         self.assertEqual(wb.sheetnames[:4],
-                         ["How to read this workbook", "Executive Summary", "Findings", "SAP vs SoftwareONE"])
+                         ["How to read this workbook", "Priority Actions", "Findings", "SAP vs SoftwareONE"])
         ws = wb["SAP vs SoftwareONE"]
 
         counts = {ws.cell(r, 1).value: (ws.cell(r, 4).value, ws.cell(r, 5).value, ws.cell(r, 6).value)
@@ -396,7 +396,7 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
                         self.assertNotEqual(cell.fill.fgColor.rgb, "004472C4")
 
     def test_only_front_tabs_have_navy_tab_colour(self):
-        front = {"How to read this workbook", "Executive Summary", "Findings",
+        front = {"How to read this workbook", "Priority Actions", "Findings",
                  "SAP vs SoftwareONE", "No Issues Found", "Risk Heatmap"}
         for ws in self.wb.worksheets:
             colour = ws.sheet_properties.tabColor
@@ -436,32 +436,27 @@ class LinkedIssuesTests(unittest.TestCase):
         self.assertLess(names.index("Findings"), names.index("Linked Issues"))
 
 
-class ExecutiveSummaryStyleTests(unittest.TestCase):
+class PriorityActionsTests(unittest.TestCase):
     def _sheet(self, result):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / "out.xlsx"
         generate(result, path)
-        return load_workbook(path)["Executive Summary"]
+        return load_workbook(path)["Priority Actions"]
 
     def _texts(self, ws):
         return [str(c.value) for row in ws.iter_rows() for c in row if c.value is not None]
 
-    def test_health_line_and_written_summary(self):
+    @staticmethod
+    def _link(cell):
+        return (cell.hyperlink.target or cell.hyperlink.location) if cell.hyperlink else None
+
+    def test_health_line_in_b2_and_no_written_summary(self):
         result = build_result()
         result.executive_summary = "The system needs attention soon."
         ws = self._sheet(result)
         self.assertEqual(ws["B2"].value, "Overall system health: ● CRITICAL")
-        self.assertIn("The system needs attention soon.", self._texts(ws))
-
-    def test_system_profile_line(self):
-        result = build_result()
-        result.system_profile = SystemProfile(sid="PRD", product="SAP S/4HANA", product_version="2022",
-                                              period_start="01.05.2026", period_end="31.05.2026")
-        texts = self._texts(self._sheet(result))
-        line = next(t for t in texts if t.startswith("System PRD"))
-        self.assertIn("SAP S/4HANA 2022", line)
-        self.assertIn("01.05.2026", line)
+        self.assertNotIn("The system needs attention soon.", self._texts(ws))
 
     def test_top_actions_numbered_once(self):
         result = build_result()
@@ -469,14 +464,60 @@ class ExecutiveSummaryStyleTests(unittest.TestCase):
         texts = self._texts(self._sheet(result))
         self.assertIn("1. Patch the kernel.", texts)
         self.assertIn("2. Tune the statement.", texts)
+        self.assertIn("Top 5 priority actions", texts)
 
-    def test_kpi_tiles_have_no_fill(self):
-        ws = self._sheet(build_result())
+    def test_action_naming_a_finding_shows_a_linked_ref_in_column_h(self):
+        result = build_result()  # F-002 is Critical, so row 2 of Findings
+        result.top_5_priority_actions = ["Tune the statement (F-002)."]
+        ws = self._sheet(result)
+        self.assertEqual(ws["H5"].value, "F-002")
+        self.assertEqual(self._link(ws["H5"]), "#'Findings'!A2")
+        self.assertEqual(ws["H5"].font.u, "single")
+
+    def test_two_refs_fill_two_rows_next_to_one_merged_text(self):
+        result = build_result()
+        result.top_5_priority_actions = ["Fix F-001 and F-002 together.", "Second action."]
+        ws = self._sheet(result)
+        self.assertIn("B5:G6", [str(m) for m in ws.merged_cells.ranges])
+        self.assertEqual([ws["H5"].value, ws["H6"].value], ["F-001", "F-002"])
+        self.assertEqual(self._link(ws["H5"]), "#'Findings'!A3")
+        self.assertEqual(self._link(ws["H6"]), "#'Findings'!A2")
+        self.assertEqual(ws["B7"].value, "2. Second action.")  # next action starts below both refs
+
+    def test_unknown_ref_gets_no_cell_and_no_link(self):
+        result = build_result()
+        result.top_5_priority_actions = ["Look at F-999 first."]
+        ws = self._sheet(result)
+        self.assertIsNone(ws["H5"].value)
+        self.assertIsNone(ws["H5"].hyperlink)
+
+    def test_no_actions_shows_one_grey_line(self):
+        result = build_result()
+        result.top_5_priority_actions = []
+        ws = self._sheet(result)
+        self.assertEqual(ws["B5"].value, "No priority actions were produced.")
+
+    def test_no_fills_below_the_title_band(self):
+        result = build_result()
+        result.top_5_priority_actions = ["Fix F-001 and F-002 together.", "Second action."]
+        ws = self._sheet(result)
         for row in ws.iter_rows():
             for cell in row:
                 if cell.row == 1:  # the navy title band
                     continue
                 self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
+
+    def test_title_has_the_system_id_when_known(self):
+        result = build_result()
+        result.system_profile = SystemProfile(sid="PRD", product="SAP S/4HANA")
+        self.assertEqual(self._sheet(result)["B1"].value, "SAP EarlyWatch Alert — PRD")
+
+    def test_title_falls_back_when_the_system_id_is_unknown(self):
+        expected = "SAP EarlyWatch Alert — Deep Analysis Report"
+        self.assertEqual(self._sheet(build_result())["B1"].value, expected)
+        result = build_result()
+        result.system_profile = SystemProfile(product="SAP S/4HANA")
+        self.assertEqual(self._sheet(result)["B1"].value, expected)
 
 
 if __name__ == "__main__":

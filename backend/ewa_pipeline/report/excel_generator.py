@@ -107,6 +107,7 @@ def _link_font():
 _HOW_TO_READ = "How to read this workbook"
 _LINKED = "Linked Issues"
 _FINDINGS = "Findings"
+_PRIORITY = "Priority Actions"
 
 
 def _build_how_to_read(wb: Workbook, tabs: set[str]):
@@ -124,7 +125,8 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     add("A plain-English review of your SAP EarlyWatch Alert report, prepared by SoftwareONE. "
         "Read this page first.", "note")
     add("What each tab shows", "head")
-    add("Executive Summary " + xs.DASH + " the overall health and the most urgent actions.")
+    add(f"{_PRIORITY} " + xs.DASH + " the overall health and the five most urgent actions, with links "
+        "to the findings they cover.")
     add(f"{_FINDINGS} " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
         "header row to filter or sort. More detail sits in the folded columns on the right.")
     if _SAP_VS_US in tabs:
@@ -185,57 +187,29 @@ def _text_lines(text, per_line=100) -> int:
     return max(1, sum(max(1, -(-len(part) // per_line)) for part in str(text).split("\n")))
 
 
-def _profile_line(profile) -> str:
-    """One quiet line about the analysed system, built from whatever is known."""
-    if profile is None:
-        return ""
-    parts = []
-    if profile.sid:
-        parts.append(f"System {profile.sid}")
-    for name, version in ((profile.product, profile.product_version),
-                          (profile.database, profile.database_version)):
-        text = " ".join(p for p in (name, version) if p)
-        if text:
-            parts.append(text)
-    if profile.os:
-        parts.append(profile.os)
-    if profile.system_role:
-        parts.append(profile.system_role)
-    if profile.period_start and profile.period_end:
-        parts.append(f"Period {profile.period_start} {xs.DASH} {profile.period_end}")
-    elif profile.period_start or profile.period_end:
-        parts.append(f"Period {profile.period_start or profile.period_end}")
-    return "  ·  ".join(parts)
-
-
 def _clean_action(text) -> str:
     """Drop a leading "1." / "2)" / bullet: the numbering is added by the workbook."""
     return re.sub(r"^\s*(?:\d+\s*[.)]|[-•*])\s*", "", str(text)).strip()
 
 
-def _build_executive_summary(wb: Workbook, result: AnalysisResult):
-    ws = wb.create_sheet("Executive Summary")
+def _build_priority_actions(wb: Workbook, result: AnalysisResult):
+    """Front tab: the overall health and the top 5 actions, each with links to the findings it names."""
+    ws = wb.create_sheet(_PRIORITY)
     _apply_app_style(ws, hide_headers=True)
 
-    # Margin columns A and I, then fixed widths (the merged text rows do not auto-fit).
+    # Margin columns A and I; B..G hold the merged action text, H the finding refs.
     for col, width in (("A", 2), ("B", 38), ("C", 16), ("D", 11), ("E", 11), ("F", 11),
-                       ("G", 11), ("H", 11), ("I", 2)):
+                       ("G", 11), ("H", 16), ("I", 2)):
         ws.column_dimensions[col].width = width
 
-    # Aggregate KPI counts
-    totals = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
-    for da in result.domain_analyses:
-        for f in da.findings:
-            if f.severity in totals:
-                totals[f.severity] += 1
-    total_findings = sum(totals.values())
-
     top_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    line = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
 
-    # Row 1: title
+    # Row 1: title, with the system id when we know it
+    sid = result.system_profile.sid if result.system_profile else ""
     ws.merge_cells("B1:H1")
     c = ws["B1"]
-    c.value = "SAP EarlyWatch Alert — Deep Analysis Report"
+    c.value = f"SAP EarlyWatch Alert {xs.DASH} {sid or 'Deep Analysis Report'}"
     c.font = _font(bold=True, size=16)
     c.alignment = Alignment(horizontal="left", vertical="center")
     xs.title_band(ws, 1, 1, 8)
@@ -251,61 +225,42 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult):
     c.alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[2].height = 24
 
-    r = 3
-    # System profile line, when we know anything about the system
-    profile = _profile_line(result.system_profile)
-    if profile:
-        ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, profile)
-        c.font = _font(size=10, color=xs.NOTE)
-        c.alignment = top_left
-        ws.row_dimensions[r].height = 15 * _text_lines(profile, 120)
-        r += 1
-
-    # Written summary
-    if result.executive_summary and result.executive_summary.strip():
-        r += 1
-        ws.merge_cells(f"B{r}:H{r}")
-        c = ws.cell(r, 2, result.executive_summary.strip())
-        c.font = _font()
-        c.alignment = top_left
-        ws.row_dimensions[r].height = 15 * _text_lines(result.executive_summary.strip(), 100)
-        r += 1
-
-    # Key numbers: a small grey label with its dot, a big number underneath. No fills.
-    r += 1
-    label_row, number_row = r, r + 1
-    ws.row_dimensions[label_row].height = 18
-    ws.row_dimensions[number_row].height = 30
-    tiles = [(4, "Total", None, total_findings)] + [
-        (5 + i, sev, xs.SEVERITY_COLOURS[sev], totals[sev]) for i, sev in enumerate(_SEV_ORDER)
-    ]
-    for col, label, dot_colour, number in tiles:
-        lc = ws.cell(label_row, col)
-        lc.value = (xs.dot_label(dot_colour, label, size=10, word_colour=xs.NOTE)
-                    if dot_colour else label)
-        lc.font = _font(size=10, color=xs.NOTE)
-        lc.alignment = Alignment(horizontal="right", vertical="bottom")
-        nc = ws.cell(number_row, col, number)
-        nc.font = _font(bold=True, size=20)
-        nc.alignment = Alignment(horizontal="right", vertical="center")
-    r = number_row + 2
-
     # Top 5 priority actions
-    c = ws.cell(r, 2, "Top 5 priority actions")
+    c = ws.cell(4, 2, "Top 5 priority actions")
     c.font = _font(bold=True, size=12, color=xs.NAVY)
-    ws.row_dimensions[r].height = 20
-    r += 1
+    ws.row_dimensions[4].height = 20
+    row_by_id, _ = _finding_rows(result)
+
+    r = 5
     for i, action in enumerate(result.top_5_priority_actions, 1):
-        text = f"{i}. {_clean_action(action)}"
-        ws.merge_cells(f"B{r}:H{r}")
+        clean = _clean_action(action)
+        text = f"{i}. {clean}"
+        refs = _refs_in_text(clean, result)
+        k = max(1, len(refs))  # one row per ref; the text is merged across them
+        ws.merge_cells(f"B{r}:G{r + k - 1}")
         c = ws.cell(r, 2, text)
         c.font = _font()
         c.alignment = top_left
+        for n, fid in enumerate(refs):
+            rc = ws.cell(r + n, 8, fid)
+            rc.font = _font()
+            rc.alignment = top_left
+            if fid in row_by_id:
+                rc.hyperlink = f"#'{_FINDINGS}'!A{row_by_id[fid]}"
+                rc.font = _link_font()
+        for rr in range(r, r + k):
+            ws.row_dimensions[rr].height = max(15, 15 * _text_lines(text, 95) / k)
         for col in range(2, 9):
-            ws.cell(r, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
-        ws.row_dimensions[r].height = 15 * _text_lines(text, 100)
-        r += 1
+            ws.cell(r + k - 1, col).border = line
+        r += k
+
+    if r == 5:
+        ws.merge_cells("B5:H5")
+        c = ws.cell(5, 2, "No priority actions were produced.")
+        c.font = _font(color=xs.MUTED)
+        c.alignment = top_left
+        for col in range(2, 9):
+            ws.cell(5, col).border = line
 
 
 _SEV_RANK = {sev: i for i, sev in enumerate(_SEV_ORDER)}
@@ -797,7 +752,7 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
         _HEATMAP if vd.heatmap_rows(result) else "",
         _LINKED if result.cross_references else "",
     })
-    _build_executive_summary(wb, result)
+    _build_priority_actions(wb, result)
     _build_all_findings(wb, result)
     if result.reconciliation:
         _build_sap_vs_us(wb, result)

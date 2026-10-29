@@ -43,7 +43,7 @@ DASH = "—"       # em dash
 # Tabs that get the navy colour (the five front tabs).
 FRONT_TABS = (
     "How to read this workbook",
-    "Executive Summary",
+    "Priority Actions",
     "Findings",
     "SAP vs SoftwareONE",
     "No Issues Found",

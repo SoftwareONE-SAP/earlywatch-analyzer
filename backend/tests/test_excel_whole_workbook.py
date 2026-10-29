@@ -24,6 +24,7 @@ def full_result():
     """A result that makes every tab appear."""
     result = build_result()
     result.executive_summary = "Two things need attention."
+    result.top_5_priority_actions = ["Tune the statement (F-002) and patch the kernel (F-001)."]
     result.system_profile = SystemProfile(sid="PRD", product="SAP S/4HANA", product_version="2022",
                                           period_start="01.05.2026", period_end="31.05.2026")
     result.cross_references = [CrossReference(
@@ -61,7 +62,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
 
     def test_every_expected_tab_is_present(self):
         names = self.wb.sheetnames
-        for name in ("How to read this workbook", "Executive Summary", "Findings", "SAP vs SoftwareONE",
+        for name in ("How to read this workbook", "Priority Actions", "Findings", "SAP vs SoftwareONE",
                      "No Issues Found", "Risk Heatmap", "Linked Issues", "Document Structure",
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
@@ -69,7 +70,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
     def _navy_rows(self, ws):
         """Title-band rows and table-header rows: the only rows allowed to have a fill."""
         rows = set()
-        if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE",
+        if ws.title in ("How to read this workbook", "Priority Actions", "SAP vs SoftwareONE",
                         "Risk Heatmap"):
             rows.add(1)
         if ws.freeze_panes:
