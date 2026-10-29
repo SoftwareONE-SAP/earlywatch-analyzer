@@ -62,7 +62,7 @@ class WholeWorkbookStyleTests(unittest.TestCase):
     def test_every_expected_tab_is_present(self):
         names = self.wb.sheetnames
         for name in ("How to read this workbook", "Executive Summary", "Findings", "SAP vs SoftwareONE",
-                     "No Issues Found", "Risk Heatmap", "Linked Issues", "Action Plan", "Document Structure",
+                     "No Issues Found", "Risk Heatmap", "Linked Issues", "Document Structure",
                      "Token Usage", "Analysis Tasks", "Source Coverage"):
             self.assertIn(name, names)
 
@@ -72,13 +72,11 @@ class WholeWorkbookStyleTests(unittest.TestCase):
         if ws.title in ("How to read this workbook", "Executive Summary", "SAP vs SoftwareONE",
                         "Risk Heatmap"):
             rows.add(1)
-        if str(ws["A1"].value).startswith("←"):
-            rows.add(1)  # back-link band on section tabs
         if ws.freeze_panes:
             rows.add(ws[ws.freeze_panes].row - 1)  # main table header
         for row in ws.iter_rows():
             values = [c.value for c in row if c.value is not None]
-            if "Worst severity" in values or "Alerts" in values:  # Exec Summary / SAP vs Us tables
+            if "Alerts" in values:  # SAP vs Us summary table
                 rows.add(row[0].row)
         return rows
 

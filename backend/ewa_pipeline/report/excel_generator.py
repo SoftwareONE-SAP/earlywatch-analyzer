@@ -45,10 +45,6 @@ def _apply_app_style(ws, *, hide_headers=False):
 def _hdr_row(ws, row, values, start_col=1):
     xs.header_row(ws, row, values, start_col=start_col)
 
-def _sheet_ref(name: str) -> str:
-    import re as _re
-    return f"'{name}'" if _re.search(r"[^A-Za-z0-9_]", name) else name
-
 def _autofit_columns(ws, min_width=8, max_width=55, skip_cols=()):
     """Set column widths based on longest content in each column."""
     col_widths: dict[int, float] = {}
@@ -106,14 +102,6 @@ def _guidance_cell(c, required):
 def _link_font():
     return xs.font(color=_C_LINK, underline="single")
 
-def _worst_severity(findings):
-    """Most serious severity among findings, or None when there are none."""
-    present = {f.severity for f in findings}
-    for sev in _SEV_ORDER:
-        if sev in present:
-            return sev
-    return None
-
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
 _HOW_TO_READ = "How to read this workbook"
@@ -136,8 +124,7 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     add("A plain-English review of your SAP EarlyWatch Alert report, prepared by SoftwareONE. "
         "Read this page first.", "note")
     add("What each tab shows", "head")
-    add("Executive Summary " + xs.DASH + " the overall health, the most urgent actions and the number of "
-        "findings in each report section.")
+    add("Executive Summary " + xs.DASH + " the overall health and the most urgent actions.")
     add(f"{_FINDINGS} " + xs.DASH + " every finding in one list, worst first. Use the arrows in the "
         "header row to filter or sort. More detail sits in the folded columns on the right.")
     if _SAP_VS_US in tabs:
@@ -148,11 +135,8 @@ def _build_how_to_read(wb: Workbook, tabs: set[str]):
     if _HEATMAP in tabs:
         add(f"{_HEATMAP} " + xs.DASH + " which report sections carry which kinds of risk, coloured by "
             "the most serious finding.")
-    add("Section tabs " + xs.DASH + " one tab per report section with findings: what the SAP report says, "
-        "what it means and what to do about it.")
     if _LINKED in tabs:
         add(f"{_LINKED} " + xs.DASH + " findings that are connected and are best handled together.")
-    add("Action Plan " + xs.DASH + " every recommended action in one list.")
 
     add("How serious is a finding?", "head")
     add(xs.legend_line(xs.severity_text("Critical"), "needs attention straight away."))
@@ -229,7 +213,7 @@ def _clean_action(text) -> str:
     return re.sub(r"^\s*(?:\d+\s*[.)]|[-•*])\s*", "", str(text)).strip()
 
 
-def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: dict[str, str]):
+def _build_executive_summary(wb: Workbook, result: AnalysisResult):
     ws = wb.create_sheet("Executive Summary")
     _apply_app_style(ws, hide_headers=True)
 
@@ -322,102 +306,6 @@ def _build_executive_summary(wb: Workbook, result: AnalysisResult, sheet_map: di
             ws.cell(r, col).border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
         ws.row_dimensions[r].height = 15 * _text_lines(text, 100)
         r += 1
-
-    r += 1
-    c = ws.cell(r, 2, "Findings by section")
-    c.font = _font(bold=True, size=12, color=xs.NAVY)
-    r += 1
-
-    # Section table
-    tbl_hdr_row = r
-    col_headers = ["Section", "Worst severity", "Findings", "Critical", "High", "Medium", "Low"]
-    xs.header_row(ws, tbl_hdr_row, col_headers, start_col=2, numeric_cols=(4, 5, 6, 7, 8))
-
-    # Worst section first: by worst severity, then most findings, then original order.
-    rows = []
-    for orig, da in enumerate(result.domain_analyses):
-        if da.section_id not in sheet_map:
-            continue
-        worst = _worst_severity(da.findings)
-        rank = _SEV_ORDER.index(worst) if worst else len(_SEV_ORDER)
-        rows.append((rank, -len(da.findings), orig, da, worst))
-    rows.sort(key=lambda t: t[:3])
-
-    r = tbl_hdr_row + 1
-    for _rank, _n, _orig, da, worst in rows:
-        sname = sheet_map[da.section_id]
-        ref = _sheet_ref(sname)
-
-        lc = ws.cell(row=r, column=2, value=da.section_title)
-        lc.hyperlink = f"#'{sname}'!A1"
-        lc.font = _link_font()
-
-        hc = ws.cell(row=r, column=3, value=xs.severity_text(worst) if worst else xs.muted(xs.DASH))
-        hc.font = _font()
-
-        sev_col = "B"
-        data_range = f"{ref}!${sev_col}$3:${sev_col}$9999"
-        ws.cell(row=r, column=4, value=f"=COUNTA({ref}!$A$3:$A$9999)")
-        # Wildcard: the Severity cells read "● High" (dot + word).
-        ws.cell(row=r, column=5, value=f'=COUNTIF({data_range},"*Critical")')
-        ws.cell(row=r, column=6, value=f'=COUNTIF({data_range},"*High")')
-        ws.cell(row=r, column=7, value=f'=COUNTIF({data_range},"*Medium")')
-        ws.cell(row=r, column=8, value=f'=COUNTIF({data_range},"*Low")')
-
-        for col in range(2, 9):
-            cell = ws.cell(row=r, column=col)
-            cell.border = Border(bottom=Side(style="thin", color=xs.ROW_LINE))
-            cell.alignment = Alignment(horizontal="right" if col >= 4 else "left",
-                                       vertical="top", wrap_text=True)
-            if col >= 4:
-                cell.font = _font()
-        r += 1
-
-    ws.auto_filter.ref = f"B{tbl_hdr_row}:H{max(r - 1, tbl_hdr_row)}"
-
-
-def _build_section_sheet(wb: Workbook, da: DomainAnalysis, sheet_name: str):
-    ws = wb.create_sheet(sheet_name)
-    _apply_app_style(ws)
-
-    # Columns A (Ref.) and B (Severity) must stay first: the Executive Summary
-    # counts findings with formulas over those two columns. New columns go last.
-    # The last two columns are reviewer notes, grouped and collapsed.
-    COLS = ["Ref.", "Severity", "Title", "What it means", "What the SAP report says",
-            "Impact", "Recommended action", "SAP transactions", "Effort", "Priority",
-            "Check latest SAP guidance first?", "How sure we are", "Risk area",
-            "How to confirm", "Reviewer note: why check first", "Reviewer note: search query"]
-
-    # Row 1: full-width back-link
-    ws.merge_cells(f"A1:{get_column_letter(len(COLS))}1")
-    bl = ws.cell(row=1, column=1, value="← Executive Summary")
-    bl.hyperlink = "#'Executive Summary'!A1"
-    bl.font = _link_font()
-    bl.alignment = _align(h="left")
-    xs.title_band(ws, 1, 1, len(COLS), size=10, bold=False, underline="single")
-
-    # Row 2: column headers
-    _hdr_row(ws, 2, COLS)
-    ws.freeze_panes = "A3"
-
-    for i, f in enumerate(da.findings):
-        r = 3 + i
-        vals = [
-            f.id, xs.severity_text(f.severity), f.title, f.description, f.evidence,
-            f.impact, f.remediation.action,
-            ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority,
-            None, xs.sure_dots(f.confidence), ", ".join(f.risk_types), f.to_confirm,
-            f.remediation.validation_reason, f.remediation.validation_query,
-        ]
-        for col, val in enumerate(vals, 1):
-            c = ws.cell(row=r, column=col, value=val)
-            c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=11), f.remediation.external_validation_required)
-
-    xs.apply_table_style(ws, header=2, last_row=max(2, 2 + len(da.findings)), last_col=len(COLS))
-    _set_widths(ws, 2, len(COLS))
-    _collapse_group(ws, 15, 16)
 
 
 _SEV_RANK = {sev: i for i, sev in enumerate(_SEV_ORDER)}
@@ -812,43 +700,6 @@ def _build_linked_issues(wb: Workbook, xrefs: list[CrossReference], analyses: li
     _set_widths(ws, 1, len(COLS))
 
 
-def _build_remediation_plan(wb: Workbook, analyses: list[DomainAnalysis]):
-    ws = wb.create_sheet("Action Plan")
-    _apply_app_style(ws)
-
-    COLS = [
-        "Ref.", "Section", "Severity", "Title", "Recommended action", "SAP transactions",
-        "Effort", "Priority", "Check latest SAP guidance first?",
-        "Reviewer note: why check first", "Reviewer note: search query",
-    ]
-    _hdr_row(ws, 1, COLS)
-    ws.freeze_panes = "A2"
-
-    _SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-    rows: list[tuple] = []
-    for da in analyses:
-        for f in da.findings:
-            rows.append((_SEV_ORDER.get(f.severity, 9), f, da.section_title))
-    rows.sort(key=lambda x: x[0])
-
-    for i, (_, f, section_title) in enumerate(rows):
-        r = 2 + i
-        vals = [
-            f.id, section_title, xs.severity_text(f.severity), f.title,
-            f.remediation.action, ", ".join(f.remediation.sap_transactions),
-            f.remediation.effort_estimate, f.remediation.priority, None,
-            f.remediation.validation_reason, f.remediation.validation_query,
-        ]
-        for col, val in enumerate(vals, 1):
-            c = ws.cell(row=r, column=col, value=val)
-            c.font = _font()
-        _guidance_cell(ws.cell(row=r, column=9), f.remediation.external_validation_required)
-
-    xs.apply_table_style(ws, header=1, last_row=max(1, 1 + len(rows)), last_col=len(COLS))
-    _set_widths(ws, 1, len(COLS))
-    _collapse_group(ws, 10, 11)
-
-
 def _build_document_structure(wb: Workbook, tree: dict):
     ws = wb.create_sheet("Document Structure")
     _apply_app_style(ws)
@@ -940,41 +791,21 @@ def generate(result: AnalysisResult, output_path: Path, tree: dict | None = None
     wb = xs.init_workbook()
     wb.remove(wb.active)
 
-    _ILLEGAL_SHEET = str.maketrans("", "", "/\\?*[]:'")
-
-    sheet_map: dict[str, str] = {}
-    used: set[str] = {_HOW_TO_READ, "Executive Summary", _FINDINGS, _LINKED, "Action Plan", "Document Structure",
-                      "Token Usage", "Analysis Tasks", "Source Coverage", _SAP_VS_US, "No Issues Found", _HEATMAP}
-    for da in result.domain_analyses:
-        if not da.findings:
-            continue
-        clean = da.section_title.translate(_ILLEGAL_SHEET).strip()[:31] or "Section"
-        base, suffix, name = clean, 1, clean
-        while name in used:
-            name = f"{base[:28]}_{suffix}"
-            suffix += 1
-        sheet_map[da.section_id] = name
-        used.add(name)
-
     _build_how_to_read(wb, {
         _SAP_VS_US if result.reconciliation else "",
         "No Issues Found" if _has_healthy_sections(result) else "",
         _HEATMAP if vd.heatmap_rows(result) else "",
         _LINKED if result.cross_references else "",
     })
-    _build_executive_summary(wb, result, sheet_map)
+    _build_executive_summary(wb, result)
     _build_all_findings(wb, result)
     if result.reconciliation:
         _build_sap_vs_us(wb, result)
     if result.coverage:
         _build_verified_healthy(wb, result)
     _build_risk_heatmap(wb, result)
-    for da in result.domain_analyses:
-        if da.section_id in sheet_map:
-            _build_section_sheet(wb, da, sheet_map[da.section_id])
     if result.cross_references:
         _build_linked_issues(wb, result.cross_references, result.domain_analyses)
-    _build_remediation_plan(wb, result.domain_analyses)
     if tree:
         _build_document_structure(wb, tree)
     _build_token_usage(wb, result.token_usage)

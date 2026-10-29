@@ -1,4 +1,4 @@
-"""The Excel workbook has a Findings tab and keeps the section-sheet layout."""
+"""The Excel workbook has a Findings tab and no per-section tabs."""
 from __future__ import annotations
 
 import sys
@@ -99,8 +99,9 @@ class ExcelGeneratorTests(unittest.TestCase):
         self.assertEqual(names[0], "How to read this workbook")
         self.assertEqual(names[1], "Executive Summary")
         self.assertEqual(names[2], "Findings")
-        for expected in ("Software Configuration", "Performance Indicators", "Action Plan", "Token Usage"):
-            self.assertIn(expected, names)
+        self.assertIn("Token Usage", names)
+        for gone in ("Software Configuration", "Performance Indicators", "Action Plan"):
+            self.assertNotIn(gone, names)
 
     def test_findings_rows_sorted_by_severity(self):
         ws = self.wb["Findings"]
@@ -149,67 +150,24 @@ class ExcelGeneratorTests(unittest.TestCase):
         self.assertEqual(ws.auto_filter.ref, "A1:S3")
         self.assertIsNone(ws["A2"].hyperlink)  # no link from Ref. to a section tab any more
 
-    def test_section_sheet_layout_kept_for_summary_formulas(self):
-        ws = self.wb["Software Configuration"]
-        self.assertEqual(ws["A3"].value, "F-001")
-        self.assertEqual(ws["B3"].value, "● Medium")
-        headers = _headers(ws, 2)
-        self.assertEqual(headers[:2], ["Ref.", "Severity"])
-        self.assertIn("What the SAP report says", headers)
-        self.assertIn("What it means", headers)
-        self.assertNotIn("Evidence", headers)
-        self.assertNotIn("Description", headers)
-        self.assertEqual(headers[-5:-2], ["How sure we are", "Risk area", "How to confirm"])
-
-    def test_section_sheet_shows_new_fields(self):
-        ws = self.wb["Performance Indicators"]
-        headers = _headers(ws, 2)
-        row = dict(zip(headers, [c.value for c in ws[3]]))
-        self.assertEqual(row["How sure we are"], "●●● High")
-        self.assertEqual(row["Risk area"], "Performance, Cost")
-        self.assertEqual(row["How to confirm"], "Check ST04 / DBACOCKPIT.")
-
     def test_reviewer_notes_columns_are_grouped_and_collapsed(self):
-        ws = self.wb["Performance Indicators"]
-        headers = _headers(ws, 2)
+        ws = self.wb["Findings"]
+        headers = _headers(ws, 1)
         for name in ("Reviewer note: why check first", "Reviewer note: search query"):
             dim = ws.column_dimensions[get_column_letter(headers.index(name) + 1)]
             self.assertTrue(dim.hidden, name)
             self.assertEqual(dim.outlineLevel, 1, name)
-        plan = self.wb["Action Plan"]
-        plan_headers = _headers(plan, 1)
-        dim = plan.column_dimensions[get_column_letter(plan_headers.index("Reviewer note: why check first") + 1)]
-        self.assertTrue(dim.hidden)
-        # Severity (column B) is never hidden: the Executive Summary counts it.
+        # Severity (column B) is never hidden.
         self.assertFalse(ws.column_dimensions["B"].hidden)
 
-    def test_executive_summary_formulas_still_use_columns_a_and_b(self):
-        ws = self.wb["Executive Summary"]
-        formulas = [
-            str(c.value) for row in ws.iter_rows() for c in row
-            if isinstance(c.value, str) and c.value.startswith("=")
-        ]
-        self.assertTrue(any("$A$3:$A$9999" in f and "COUNTA" in f for f in formulas))
-        self.assertTrue(any("B$3:$B$9999" in f or "B3:B9999" in f.replace("$", "") for f in formulas))
-
-    def test_executive_summary_counts_use_wildcard_for_dot_severity(self):
-        # Severity cells read "● High", so the COUNTIF criteria need a leading wildcard.
-        ws = self.wb["Executive Summary"]
-        formulas = [
-            str(c.value) for row in ws.iter_rows() for c in row
-            if isinstance(c.value, str) and c.value.startswith("=COUNTIF")
-        ]
-        for word in ("Critical", "High", "Medium", "Low"):
-            self.assertTrue(any(f.endswith(f',"*{word}")') for f in formulas), word)
-        self.assertFalse(any(f.endswith(',"High")') for f in formulas))
-
-    def test_section_named_findings_does_not_collide(self):
+    def test_section_titled_findings_does_not_create_a_second_tab(self):
         result = build_result()
         result.domain_analyses[0].section_title = "Findings"
         path = Path(self._tmp.name) / "collide.xlsx"
         generate(result, path)
         names = load_workbook(path).sheetnames
         self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(names.count("Findings"), 1)
         self.assertEqual(names[2], "Findings")
 
     def test_how_to_read_is_first_and_active(self):
@@ -224,15 +182,8 @@ class ExcelGeneratorTests(unittest.TestCase):
 
     def test_technical_tabs_are_hidden_and_the_rest_visible(self):
         self.assertEqual(self.wb["Token Usage"].sheet_state, "hidden")
-        for name in ("How to read this workbook", "Executive Summary", "Findings",
-                     "Software Configuration", "Action Plan"):
+        for name in ("How to read this workbook", "Executive Summary", "Findings"):
             self.assertEqual(self.wb[name].sheet_state, "visible", name)
-
-    def test_tab_order_front_tabs_sections_then_action_plan(self):
-        names = self.wb.sheetnames
-        self.assertEqual(names[:3], ["How to read this workbook", "Executive Summary", "Findings"])
-        self.assertLess(names.index("Performance Indicators"), names.index("Action Plan"))
-        self.assertLess(names.index("Action Plan"), names.index("Token Usage"))
 
 
 def _finding(fid: str, severity: str) -> Finding:
@@ -436,14 +387,6 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
             self.assertEqual(cell.border.bottom.style, "thin")
             self.assertEqual(cell.border.bottom.color.rgb[-6:], "1F3864")
 
-    def test_section_tab_back_link_is_a_navy_band_with_white_link(self):
-        ws = self.wb.worksheets[2]  # first section tab after the front tabs
-        while ws["A1"].value != "← Executive Summary":
-            ws = self.wb.worksheets[self.wb.worksheets.index(ws) + 1]
-        self.assertEqual(ws["A1"].fill.start_color.rgb[-6:], "1F3864")
-        self.assertEqual(ws["A1"].font.color.rgb[-6:], "FFFFFF")
-        self.assertIsNotNone(ws["A1"].hyperlink)
-
     def test_no_cambria_and_header_not_blue(self):
         for ws in self.wb.worksheets:
             for row in ws.iter_rows():
@@ -468,7 +411,6 @@ class MinimalReportBaseStyleTests(unittest.TestCase):
         self.assertEqual(int(ws.page_setup.paperSize), 9)
         self.assertEqual(ws.page_setup.fitToWidth, 1)
         self.assertEqual(ws.print_title_rows, "$1:$1")
-        self.assertEqual(self.wb["Performance Indicators"].print_title_rows, "$2:$2")
 
 
 class LinkedIssuesTests(unittest.TestCase):
@@ -491,7 +433,7 @@ class LinkedIssuesTests(unittest.TestCase):
         self.assertIn("Linked Issues", how)
         self.assertNotIn("Cross-References", how)
         names = wb.sheetnames
-        self.assertLess(names.index("Linked Issues"), names.index("Action Plan"))
+        self.assertLess(names.index("Findings"), names.index("Linked Issues"))
 
 
 class ExecutiveSummaryStyleTests(unittest.TestCase):
@@ -530,49 +472,11 @@ class ExecutiveSummaryStyleTests(unittest.TestCase):
 
     def test_kpi_tiles_have_no_fill(self):
         ws = self._sheet(build_result())
-        navy_rows = {1} | {c.row for row in ws.iter_rows() for c in row if c.value == "Worst severity"}
         for row in ws.iter_rows():
             for cell in row:
-                if cell.row in navy_rows:
+                if cell.row == 1:  # the navy title band
                     continue
                 self.assertIn(cell.fill.fill_type, (None, ""), cell.coordinate)
-
-
-class WorstSeverityTests(unittest.TestCase):
-    def _summary_rows(self, result):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        path = Path(tmp.name) / "out.xlsx"
-        generate(result, path)
-        ws = load_workbook(path)["Executive Summary"]
-        hdr = next(r for r in ws.iter_rows() if r[2].value == "Worst severity")
-        rows = []
-        for r in range(hdr[0].row + 1, ws.max_row + 1):
-            if ws.cell(row=r, column=2).value:
-                rows.append((ws.cell(row=r, column=2).value, ws.cell(row=r, column=3).value))
-        return rows
-
-    def test_worst_severity_and_sorting(self):
-        result = build_result()
-        # Medium-only section listed first, but labelled "Healthy" by the AI.
-        result.domain_analyses = [
-            DomainAnalysis(section_title="Mild", section_id="1", overall_health="Healthy",
-                           findings=[_finding("M-1", "Medium"), _finding("M-2", "Low")]),
-            DomainAnalysis(section_title="Serious", section_id="2", overall_health="Healthy",
-                           findings=[_finding("H-1", "Low"), _finding("H-2", "High")]),
-        ]
-        rows = self._summary_rows(result)
-        self.assertEqual([r[0] for r in rows], ["Serious", "Mild"])
-        self.assertEqual([r[1] for r in rows], ["● High", "● Medium"])
-
-    def test_ties_sorted_by_finding_count(self):
-        result = build_result()
-        result.domain_analyses = [
-            DomainAnalysis(section_title="One", section_id="1", overall_health="Warning", findings=[_finding("A-1", "High")]),
-            DomainAnalysis(section_title="Two", section_id="2", overall_health="Warning",
-                           findings=[_finding("B-1", "High"), _finding("B-2", "Low")]),
-        ]
-        self.assertEqual([r[0] for r in self._summary_rows(result)], ["Two", "One"])
 
 
 if __name__ == "__main__":
