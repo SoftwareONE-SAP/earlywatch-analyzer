@@ -11,7 +11,7 @@ from ewa_pipeline.agents.alert_decision import score_alerts
 from ewa_pipeline.agents.runner import run_analysis
 from ewa_pipeline.config import Config
 from ewa_pipeline.indexer.tree_navigator import get_analyzable_sections
-from ewa_pipeline.report import excel_generator
+from ewa_pipeline.report import excel_generator, explorer_html
 from ewa_pipeline.report.reconciliation import reconcile
 from ewa_pipeline.indexer.sap_summary import extract_service_summary
 from ewa_pipeline.indexer.system_profile import extract_system_profile, profile_to_prompt_text
@@ -30,6 +30,7 @@ class PipelineArtifacts:
     cost_path: Path
     tree_path: Path
     doc_name: str
+    explorer_path: Path | None = None
 
 
 def run_pipeline(
@@ -124,6 +125,7 @@ def run_pipeline(
         detail=output_path.name,
         percent=100,
     )
+    explorer_path = _write_explorer_safely(result, output_path, doc_name)
 
     cost_tracker.save(cost_path, document_name=doc_name)
     reporter.emit(
@@ -140,8 +142,19 @@ def run_pipeline(
         cost_path=cost_path,
         tree_path=tree_path,
         doc_name=doc_name,
+        explorer_path=explorer_path,
     )
     return result, cost_tracker, artifacts
+
+
+def _write_explorer_safely(result, output_path: Path, source_name: str) -> Path | None:
+    """Write the interactive HTML page next to the workbook. Never breaks an analysis."""
+    try:
+        target = output_path.with_name(f"{output_path.stem}_explorer.html")
+        return explorer_html.write_explorer(result, target, source_name)
+    except Exception as exc:
+        logger.warning("Explorer HTML failed: %s", exc)
+        return None
 
 
 def _reconcile_safely(result, sap_summary, tree, system_profile, config: Config) -> list:

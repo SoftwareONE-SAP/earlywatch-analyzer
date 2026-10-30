@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EarlyWatch Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070b16; --bg2:#0c1324; --card:rgba(255,255,255,.045); --card-h:rgba(255,255,255,.08);
+  --line:rgba(255,255,255,.09); --text:#e8ecf6; --muted:#8b95ad; --accent:#5ee7ff; --accent2:#a78bfa;
+  --crit:#ff4d6d; --high:#ff8a3d; --med:#f5c542; --low:#4ea8ff; --ok:#3ddc97;
+  --shadow:0 20px 60px rgba(0,0,0,.45);
+}
+:root[data-theme="light"]{
+  --bg:#f3f5fb; --bg2:#ffffff; --card:rgba(10,20,50,.04); --card-h:rgba(10,20,50,.08);
+  --line:rgba(10,20,50,.1); --text:#111827; --muted:#5b6478; --accent:#0891b2; --accent2:#7c3aed;
+  --shadow:0 20px 50px rgba(20,30,60,.12);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,sans-serif;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none;
+  background:radial-gradient(40% 35% at 15% 10%,rgba(94,231,255,.16),transparent 70%),
+             radial-gradient(35% 30% at 85% 20%,rgba(167,139,250,.16),transparent 70%),
+             radial-gradient(40% 40% at 50% 100%,rgba(255,138,61,.08),transparent 70%);
+  animation:drift 22s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate3d(3%,2%,0) scale(1.05)}}
+a{color:inherit}
+.mono{font-family:"JetBrains Mono",monospace;font-size:.85em}
+.wrap{max-width:1240px;margin:0 auto;padding:0 20px}
+
+/* nav */
+nav{position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 70%,transparent);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:6px;height:60px;overflow-x:auto;scrollbar-width:none}
+.brand{font-weight:800;letter-spacing:-.02em;margin-right:14px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.brand i{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+nav a.tab{padding:7px 12px;border-radius:999px;text-decoration:none;color:var(--muted);font-weight:500;font-size:14px;white-space:nowrap;transition:.2s}
+nav a.tab:hover,nav a.tab.on{color:var(--text);background:var(--card-h)}
+.spacer{flex:1}
+.iconbtn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:10px;padding:7px 10px;cursor:pointer;font:inherit;font-size:13px}
+
+/* hero */
+.hero{padding:56px 0 28px;display:grid;grid-template-columns:1.3fr 1fr;gap:36px;align-items:center}
+.eyebrow{color:var(--accent);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:12px}
+h1{font-size:clamp(34px,5vw,58px);line-height:1.02;margin:10px 0 16px;letter-spacing:-.035em;font-weight:800;
+  background:linear-gradient(120deg,var(--text) 30%,var(--accent) 70%,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{color:var(--muted);max-width:56ch;margin:0 0 22px}
+.health{display:inline-flex;align-items:center;gap:10px;padding:9px 16px;border-radius:999px;font-weight:700;letter-spacing:.06em;
+  background:color-mix(in srgb,var(--med) 14%,transparent);color:var(--med);border:1px solid color-mix(in srgb,var(--med) 40%,transparent)}
+.health i{width:10px;height:10px;border-radius:50%;background:currentColor;animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 12px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.ring-box{position:relative;justify-self:center;width:290px;height:290px}
+.ring-box svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring-box circle{fill:none;stroke-width:16;stroke-linecap:round;transition:stroke-dasharray 1.4s cubic-bezier(.2,.8,.2,1)}
+.ring-c{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.ring-c b{font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:1}
+.ring-c span{color:var(--muted);font-size:13px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:8px;font-size:13px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--c)}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:8px 0 10px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;cursor:pointer;transition:.25s;position:relative;overflow:hidden}
+.kpi:hover{transform:translateY(-3px);background:var(--card-h);box-shadow:var(--shadow)}
+.kpi::after{content:"";position:absolute;inset:auto -30% -60% auto;width:120px;height:120px;border-radius:50%;background:var(--c,var(--accent));opacity:.14;filter:blur(18px)}
+.kpi b{display:block;font-size:34px;font-weight:800;letter-spacing:-.03em;color:var(--c,var(--text))}
+.kpi span{color:var(--muted);font-size:13px}
+
+/* sections */
+section{padding:46px 0 10px}
+h2{font-size:28px;letter-spacing:-.025em;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+h2 .n{font-size:13px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--line);padding:3px 10px;border-radius:999px}
+.sub{color:var(--muted);margin:0 0 22px;max-width:80ch}
+
+.actions{display:grid;gap:12px}
+.action{display:grid;grid-template-columns:60px 1fr;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px;cursor:pointer;transition:.25s}
+.action:hover{background:var(--card-h)}
+.action .num{font-size:40px;font-weight:800;line-height:1;background:linear-gradient(160deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.action h3{margin:2px 0 8px;font-size:17px;line-height:1.35}
+.action .body{color:var(--muted);max-height:0;overflow:hidden;transition:max-height .45s ease}
+.action.open .body{max-height:900px}
+.action .more{font-size:12px;color:var(--accent);font-weight:600}
+.action.open .more::after{content:" ▲"} .action:not(.open) .more::after{content:" ▼"}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.ref{font-family:"JetBrains Mono",monospace;font-size:12px;padding:4px 9px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);cursor:pointer;color:var(--text);transition:.15s;display:inline-flex;gap:6px;align-items:center}
+.ref:hover{border-color:var(--accent);color:var(--accent)}
+.ref i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+
+.combos{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.combo{background:linear-gradient(180deg,var(--card-h),var(--card));border:1px solid var(--line);border-radius:18px;padding:20px;position:relative;overflow:hidden}
+.combo::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--accent),var(--accent2))}
+.combo h3{margin:0 0 8px;font-size:16px;line-height:1.35}
+.combo p{color:var(--muted);margin:0;font-size:14px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.combo p.full{-webkit-line-clamp:unset}
+
+/* findings */
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;position:sticky;top:60px;z-index:20;padding:12px 0;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(10px)}
+.search{flex:1 1 260px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 12px}
+.search input{flex:1;background:none;border:0;outline:0;color:var(--text);font:inherit;padding:10px 0}
+.pill{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:7px 13px;font:inherit;font-size:13px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:7px}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.pill.on{color:var(--text);border-color:color-mix(in srgb,var(--c,var(--accent)) 60%,transparent);background:color-mix(in srgb,var(--c,var(--accent)) 16%,transparent)}
+select.pill{appearance:none;padding-right:13px;max-width:220px}
+select.pill option{background:var(--bg2);color:var(--text)}
+.active-filter{display:none;align-items:center;gap:8px;font-size:13px;color:var(--accent);margin:-6px 0 12px}
+.active-filter.show{display:flex}
+.count{color:var(--muted);font-size:13px;margin-left:auto}
+
+.flist{display:grid;gap:8px}
+.frow{display:grid;grid-template-columns:6px 96px 1fr auto;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 16px 12px 0;cursor:pointer;transition:.18s;animation:in .35s both}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.frow:hover{background:var(--card-h);transform:translateX(3px)}
+.frow .bar{align-self:stretch;border-radius:0 4px 4px 0;background:var(--c)}
+.frow .t{font-weight:600}
+.frow .m{color:var(--muted);font-size:13px;margin-top:2px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);white-space:nowrap}
+.dots{letter-spacing:2px;color:var(--accent)}
+.empty{padding:40px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:14px}
+
+/* compare */
+.cmp-bar{display:flex;height:46px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-bottom:12px}
+.cmp-bar div{background:var(--c);display:grid;place-items:center;color:#0b0f1c;font-weight:800;font-size:14px;cursor:pointer;transition:filter .2s,flex-grow .8s;min-width:28px}
+.cmp-bar div:hover{filter:brightness(1.15)}
+.cmp-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.table{border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.trow{display:grid;grid-template-columns:70px 1.5fr 90px 24px 90px 1.4fr 150px;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--line);cursor:pointer;transition:background .15s;font-size:14px}
+.trow:hover{background:var(--card)}
+.trow.head{border-top:0;background:var(--card);color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;cursor:default}
+.trow .arrow{color:var(--muted);text-align:center}
+.trow .exp{grid-column:1/-1;color:var(--muted);display:none;padding:4px 0 6px;font-size:14px}
+.trow.open .exp{display:block}
+.rate{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px}
+.rate i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.res{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:color-mix(in srgb,var(--c) 18%,transparent);color:var(--c);text-align:center}
+
+/* heatmap */
+.hm{overflow-x:auto;border:1px solid var(--line);border-radius:16px}
+.hm table{border-collapse:separate;border-spacing:4px;width:100%;min-width:900px;padding:6px}
+.hm th{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:8px 6px;text-align:center}
+.hm th:first-child{text-align:left}
+.hm td.sec{font-size:13.5px;padding:6px 10px;max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hm td.cell{text-align:center;border-radius:9px;height:36px;min-width:72px;font-weight:700;font-size:14px;transition:transform .15s}
+.hm td.cell.has{background:color-mix(in srgb,var(--c) calc(18% + var(--a) * 62%),transparent);color:var(--text);cursor:pointer;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 55%,transparent)}
+.hm td.cell.has:hover{transform:scale(1.12);z-index:2;position:relative}
+.hm td.cell.none{background:var(--card)}
+.hm td.tot{text-align:center;font-weight:700;color:var(--muted)}
+.hm tr.total td{border-top:1px solid var(--line);font-weight:800}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(3,6,14,.55);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:.3s;z-index:60}
+.scrim.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(640px,100%);background:var(--bg2);border-left:1px solid var(--line);z-index:70;transform:translateX(105%);transition:transform .38s cubic-bezier(.2,.8,.2,1);overflow-y:auto;box-shadow:var(--shadow)}
+.drawer.show{transform:none}
+.dh{padding:26px 28px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg2);z-index:2}
+.dh::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--c)}
+.dh h3{font-size:22px;line-height:1.25;margin:10px 0 12px;letter-spacing:-.02em}
+.dh .close{position:absolute;right:18px;top:18px}
+.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.meta div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+.meta small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.meta b{font-size:14px}
+.db{padding:8px 28px 40px}
+.field{padding:16px 0;border-bottom:1px solid var(--line)}
+.field small{display:block;color:var(--accent);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.field p{margin:0;white-space:pre-wrap}
+.field.note{opacity:.75}
+.nav2{display:flex;justify-content:space-between;padding:0 28px 30px}
+
+footer{color:var(--muted);font-size:13px;text-align:center;padding:60px 0 40px}
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s,transform .7s}
+.reveal.vis{opacity:1;transform:none}
+
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr}
+  .ring-box{width:230px;height:230px}
+  .trow{grid-template-columns:1fr 1fr;font-size:13px}
+  .trow .hide-m,.trow.head{display:none}
+  .frow{grid-template-columns:6px 1fr;padding-right:12px}
+  .frow .tag,.frow .side{grid-column:2}
+  .meta{grid-template-columns:repeat(2,1fr)}
+  .combos{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <div class="brand"><i></i><span id="brand">EarlyWatch</span></div>
+  <a class="tab" href="#overview">Overview</a>
+  <a class="tab" href="#actions">Top actions</a>
+  <a class="tab" href="#combos">Combined risks</a>
+  <a class="tab" href="#findings">Findings</a>
+  <a class="tab" href="#compare">SAP vs SoftwareONE</a>
+  <a class="tab" href="#heatmap">Heatmap</a>
+  <div class="spacer"></div>
+  <button class="iconbtn" id="theme" title="Switch light / dark">◐ Theme</button>
+</div></nav>
+
+<main class="wrap">
+  <section id="overview" class="hero" style="padding-top:56px">
+    <div>
+      <div class="eyebrow">SAP EarlyWatch Alert · analysed report</div>
+      <h1 id="title"></h1>
+      <p class="lede" id="lede"></p>
+      <div class="health" id="health"><i></i><span></span></div>
+    </div>
+    <div>
+      <div class="ring-box"><svg viewBox="0 0 200 200" id="ring"></svg>
+        <div class="ring-c"><b id="ringNum">0</b><span>findings</span></div></div>
+      <div class="legend" id="ringLegend"></div>
+    </div>
+  </section>
+  <div class="kpis reveal" id="kpis"></div>
+
+  <section id="actions" class="reveal">
+    <h2>Top 5 priority actions</h2>
+    <p class="sub">What to do first. Click a card to read the full action; click a reference to open that finding.</p>
+    <div class="actions" id="actionList"></div>
+  </section>
+
+  <section id="combos" class="reveal">
+    <h2>Risks that add up <span class="n" id="comboN"></span></h2>
+    <p class="sub">Findings that are more serious together than apart. Click the text to expand.</p>
+    <div class="combos" id="comboList"></div>
+  </section>
+
+  <section id="findings">
+    <h2>All findings <span class="n" id="findN"></span></h2>
+    <p class="sub">Every finding, worst first. Search, filter, then click any row for the full detail.</p>
+    <div class="toolbar">
+      <label class="search">🔍<input id="q" placeholder="Search title, section, SAP transaction, ref…"></label>
+      <div id="sevPills" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <select class="pill" id="prio"><option value="">Any priority</option></select>
+      <select class="pill" id="risk"><option value="">Any risk area</option></select>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="active-filter" id="af"><span></span><button class="iconbtn" id="afClear">Clear</button></div>
+    <div class="flist" id="flist"></div>
+  </section>
+
+  <section id="compare" class="reveal">
+    <h2>SAP vs SoftwareONE</h2>
+    <p class="sub" id="cmpNote"></p>
+    <div class="cmp-bar" id="cmpBar"></div>
+    <div class="cmp-legend" id="cmpLegend"></div>
+    <div class="table" id="cmpTable"></div>
+  </section>
+
+  <section id="heatmap" class="reveal">
+    <h2>Risk heatmap</h2>
+    <p class="sub" id="hmNote"></p>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="pill on" id="hmOnly">Only sections with findings</button>
+      <span class="legend" style="margin:0" id="hmLegend"></span>
+    </div>
+    <div class="hm"><table id="hmTable"></table></div>
+  </section>
+</main>
+<footer id="foot"></footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-live="polite"></aside>
+
+<script>
+const DATA = /*__DATA__*/null;
+/* sections with nothing to show are hidden, together with their nav tab */
+const hideSection = id => { const s = document.getElementById(id); if(s) s.style.display = "none";
+  const t = document.querySelector(`a.tab[href="#${id}"]`); if(t) t.style.display = "none"; };
+if(!DATA.compare.rows.length) hideSection("compare");
+if(!DATA.heatmap.rows.length) hideSection("heatmap");
+const SEV = {Critical:"var(--crit)",High:"var(--high)",Medium:"var(--med)",Low:"var(--low)"};
+const RATE = {Red:"var(--crit)",Yellow:"var(--med)",Green:"var(--ok)"};
+const SEV_ORDER = ["Critical","High","Medium","Low"];
+const RES_C = {"Agree":"var(--ok)","We rate it more serious":"var(--high)","We rate it less serious":"var(--low)",
+  "Please check":"var(--accent2)","Not found in our analysis":"var(--crit)","No detail to compare":"var(--muted)"};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const F = DATA.findings;
+const byRef = Object.fromEntries(F.map(f => [f["Ref."], f]));
+const refChip = r => { const f = byRef[r]; return `<button class="ref" data-ref="${esc(r)}" style="--c:${f ? SEV[f.Severity] : "var(--muted)"}" title="${esc(f ? f.Title : "")}"><i></i>${esc(r)}</button>`; };
+
+/* ---------- hero ---------- */
+const sys = DATA.sid || (DATA.title.match(/—\s*(.+)$/) || [, ""])[1];
+$("#brand").textContent = `EarlyWatch · ${sys}`;
+$("#title").textContent = `System ${sys} health check`;
+$("#lede").textContent = DATA.summary;
+$("#health span").textContent = DATA.health;
+$("#health").style.color = {HEALTHY:"var(--ok)",UNKNOWN:"var(--muted)",WARNING:"var(--med)",CRITICAL:"var(--crit)",OK:"var(--ok)",GOOD:"var(--ok)"}[DATA.health.toUpperCase()] || "var(--med)";
+const sevCount = Object.fromEntries(SEV_ORDER.map(s => [s, F.filter(f => f.Severity === s).length]));
+(function ring(){
+  const C = 2*Math.PI*80, total = F.length; let off = 0, html = `<circle cx="100" cy="100" r="80" stroke="var(--line)"/>`;
+  SEV_ORDER.forEach(s => { const n = sevCount[s]; if(!n) return; const len = n/total*C;
+    html += `<circle class="seg" cx="100" cy="100" r="80" stroke="${SEV[s]}" stroke-dasharray="0 ${C}" data-d="${Math.max(len-3,1)} ${C}" stroke-dashoffset="${-off}"/>`; off += len; });
+  $("#ring").innerHTML = html;
+  setTimeout(() => document.querySelectorAll(".seg").forEach(c => c.setAttribute("stroke-dasharray", c.dataset.d)), 150);
+  $("#ringLegend").innerHTML = SEV_ORDER.filter(s => sevCount[s]).map(s => `<span style="--c:${SEV[s]}">${s} ${sevCount[s]}</span>`).join("");
+  countUp($("#ringNum"), total);
+})();
+function countUp(el, to){ const t0 = performance.now(); const step = t => { const p = Math.min((t-t0)/1200,1); el.textContent = Math.round(to*(1-Math.pow(1-p,3))); if(p<1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+
+const agree = DATA.compare.summary.find(s => s.result === "Agree");
+const compared = DATA.compare.summary.filter(s => s.result !== "No detail to compare").reduce((a,s) => a + s.total, 0);
+const kpis = [
+  ...SEV_ORDER.filter(s => sevCount[s]).map(s => ({n:sevCount[s], l:`${s} severity`, c:SEV[s], go:() => setFilter({sev:s})})),
+  {n:F.filter(f => f.Priority === "Immediate").length, l:"Do immediately", c:"var(--crit)", go:() => setFilter({prio:"Immediate"})},
+  ...(DATA.compare.rows.length ? [{n:compared && agree ? Math.round(agree.total/compared*100) + "%" : "—", l:"Agreement with SAP", c:"var(--ok)", go:() => location.hash = "#compare"}] : []),
+];
+$("#kpis").innerHTML = kpis.map((k,i) => `<div class="kpi" data-i="${i}" style="--c:${k.c}"><b>${k.n}</b><span>${k.l}</span></div>`).join("");
+$("#kpis").onclick = e => { const k = e.target.closest(".kpi"); if(k) kpis[k.dataset.i].go(); };
+
+/* ---------- actions & combos ---------- */
+$("#actionList").innerHTML = DATA.actions.map((a,i) => `<div class="action${i===0?" open":""}">
+  <div class="num">${String(i+1).padStart(2,"0")}</div>
+  <div><h3>${esc(a.head)}</h3><div class="body"><p style="margin:0 0 6px">${esc(a.body)}</p></div>
+  <span class="more">Details</span><div class="chips">${a.refs.map(refChip).join("")}</div></div></div>`).join("");
+$("#actionList").addEventListener("click", e => { if(!e.target.closest(".ref")) e.target.closest(".action")?.classList.toggle("open"); });
+$("#comboN").textContent = DATA.combos.length;
+$("#comboList").innerHTML = DATA.combos.map(c => `<div class="combo"><h3>${esc(c.head)}</h3><p>${esc(c.body)}</p><div class="chips">${c.refs.map(refChip).join("")}</div></div>`).join("");
+$("#comboList").addEventListener("click", e => { if(e.target.tagName === "P") e.target.classList.toggle("full"); });
+
+/* ---------- findings explorer ---------- */
+const state = {q:"", sev:new Set(), prio:"", risk:"", section:"", riskOnly:""};
+const uniq = arr => [...new Set(arr)].filter(Boolean);
+$("#findN").textContent = F.length;
+$("#sevPills").innerHTML = SEV_ORDER.filter(s => sevCount[s]).map(s => `<button class="pill" data-s="${s}" style="--c:${SEV[s]}"><i></i>${s}</button>`).join("");
+uniq(F.map(f => f.Priority)).forEach(p => $("#prio").add(new Option(p, p)));
+uniq(F.flatMap(f => f["Risk area"].split(",").map(s => s.trim()))).sort().forEach(r => $("#risk").add(new Option(r, r)));
+$("#sevPills").onclick = e => { const b = e.target.closest(".pill"); if(!b) return; const s = b.dataset.s; state.sev.has(s) ? state.sev.delete(s) : state.sev.add(s); b.classList.toggle("on"); renderFindings(); };
+$("#q").oninput = e => { state.q = e.target.value.toLowerCase(); renderFindings(); };
+$("#prio").onchange = e => { state.prio = e.target.value; e.target.classList.toggle("on", !!state.prio); renderFindings(); };
+$("#risk").onchange = e => { state.risk = e.target.value; e.target.classList.toggle("on", !!state.risk); renderFindings(); };
+$("#afClear").onclick = () => { state.section = ""; renderFindings(); };
+
+function setFilter({sev, prio, section, risk}){
+  state.sev = new Set(sev ? [sev] : []); state.prio = prio || ""; state.risk = risk || ""; state.section = section || ""; state.q = "";
+  $("#q").value = ""; $("#prio").value = state.prio; $("#risk").value = state.risk;
+  $("#prio").classList.toggle("on", !!state.prio); $("#risk").classList.toggle("on", !!state.risk);
+  document.querySelectorAll("#sevPills .pill").forEach(b => b.classList.toggle("on", state.sev.has(b.dataset.s)));
+  renderFindings(); document.getElementById("findings").scrollIntoView({behavior:"smooth"});
+}
+let visible = F;
+function renderFindings(){
+  visible = F.filter(f => {
+    if(state.sev.size && !state.sev.has(f.Severity)) return false;
+    if(state.prio && f.Priority !== state.prio) return false;
+    if(state.risk && !f["Risk area"].includes(state.risk)) return false;
+    if(state.section && f.Section !== state.section) return false;
+    if(state.q && !Object.values(f).join(" ").toLowerCase().includes(state.q)) return false;
+    return true;
+  });
+  $("#af").classList.toggle("show", !!state.section);
+  $("#af span").textContent = state.section ? `Showing section: ${state.section}` : "";
+  $("#count").textContent = `${visible.length} of ${F.length}`;
+  $("#flist").innerHTML = visible.length ? visible.map((f,i) => `<div class="frow" data-ref="${esc(f["Ref."])}" style="--c:${SEV[f.Severity]};animation-delay:${Math.min(i,20)*18}ms">
+    <div class="bar"></div><span class="tag">${esc(f.Severity)}</span>
+    <div><div class="t">${esc(f.Title)}</div><div class="m"><span class="mono">${esc(f["Ref."])}</span><span>${esc(f.Section)}</span><span>${esc(f["Risk area"])}</span></div></div>
+    <div class="side m" style="text-align:right;display:block"><div>${esc(f.Priority)}</div><div class="dots" title="How sure we are: ${esc(f["How sure we are"])}">${dots(f["How sure we are"])}</div></div></div>`).join("")
+    : `<div class="empty">No findings match. Try clearing a filter.</div>`;
+}
+const dots = c => ({High:"●●●",Medium:"●●○",Low:"●○○"}[c] || "");
+$("#flist").onclick = e => { const r = e.target.closest(".frow"); if(r) openFinding(r.dataset.ref, visible); };
+document.addEventListener("click", e => { const r = e.target.closest(".ref"); if(r) openFinding(r.dataset.ref); });
+renderFindings();
+
+/* ---------- drawer ---------- */
+const MAIN = ["What it means","Recommended action","Impact","Why","How to confirm","What the SAP report says","SAP transactions"];
+let navList = F, cur = -1;
+function openFinding(ref, list){
+  const f = byRef[ref]; if(!f) return;
+  navList = list && list.includes(f) ? list : F; cur = navList.indexOf(f);
+  const extra = Object.keys(f).filter(k => !MAIN.includes(k) && !["Ref.","Severity","Title","Priority","Effort","How sure we are","Section","Risk area"].includes(k) && f[k]);
+  $("#drawer").style.setProperty("--c", SEV[f.Severity]);
+  $("#drawer").innerHTML = `<div class="dh"><button class="iconbtn close" id="dClose">✕ Close</button>
+    <span class="tag" style="--c:${SEV[f.Severity]}">${esc(f.Severity)}</span> <span class="mono" style="color:var(--muted)">${esc(f["Ref."])}</span>
+    <h3>${esc(f.Title)}</h3>
+    <div class="meta">${[["Priority",f.Priority],["Effort",f.Effort],["How sure",`${dots(f["How sure we are"])} ${f["How sure we are"]}`],["Section",f.Section],["Risk area",f["Risk area"]],["Due date",f["Due date"]||"—"]]
+      .map(([k,v]) => `<div><small>${k}</small><b>${esc(v)}</b></div>`).join("")}</div></div>
+    <div class="db">${MAIN.filter(k => f[k]).map(k => `<div class="field"><small>${k}</small><p>${esc(f[k])}</p></div>`).join("")}
+      ${extra.map(k => `<div class="field${k.startsWith("Reviewer") ? " note" : ""}"><small>${esc(k)}</small><p>${esc(f[k])}</p></div>`).join("")}</div>
+    <div class="nav2"><button class="iconbtn" id="dPrev">← Previous</button><span style="color:var(--muted);font-size:13px;align-self:center">${cur+1} / ${navList.length}</span><button class="iconbtn" id="dNext">Next →</button></div>`;
+  $("#drawer").scrollTop = 0;
+  $("#drawer").classList.add("show"); $("#scrim").classList.add("show");
+  $("#dClose").onclick = closeDrawer;
+  $("#dPrev").onclick = () => step(-1); $("#dNext").onclick = () => step(1);
+}
+const step = d => { const n = navList[(cur + d + navList.length) % navList.length]; openFinding(n["Ref."], navList); };
+const closeDrawer = () => { $("#drawer").classList.remove("show"); $("#scrim").classList.remove("show"); };
+$("#scrim").onclick = closeDrawer;
+document.addEventListener("keydown", e => {
+  if(!$("#drawer").classList.contains("show")) return;
+  if(e.key === "Escape") closeDrawer(); if(e.key === "ArrowRight") step(1); if(e.key === "ArrowLeft") step(-1);
+});
+
+/* ---------- SAP vs SoftwareONE ---------- */
+const CMP = DATA.compare; let cmpFilter = "";
+$("#cmpNote").textContent = CMP.note;
+$("#cmpBar").innerHTML = CMP.summary.filter(s => s.total).map(s => `<div data-r="${esc(s.result)}" style="--c:${RES_C[s.result]||"var(--muted)"};flex-grow:${s.total}" title="${esc(s.result)}: ${s.total} (${s.alerts} alerts, ${s.checks} checks)">${s.total}</div>`).join("");
+$("#cmpLegend").innerHTML = `<button class="pill on" data-r="">All ${CMP.rows.length}</button>` + CMP.summary.filter(s => s.total).map(s => `<button class="pill" data-r="${esc(s.result)}" style="--c:${RES_C[s.result]}"><i></i>${esc(s.result)} · ${s.total}</button>`).join("");
+const setCmp = r => { cmpFilter = r; document.querySelectorAll("#cmpLegend .pill").forEach(b => b.classList.toggle("on", b.dataset.r === r)); renderCmp(); };
+$("#cmpLegend").onclick = e => { const b = e.target.closest(".pill"); if(b) setCmp(b.dataset.r); };
+$("#cmpBar").onclick = e => { const b = e.target.closest("[data-r]"); if(b) setCmp(b.dataset.r); };
+const rate = r => r ? `<span class="rate" style="--c:${RATE[r]||SEV[r]||"var(--muted)"}"><i></i>${esc(r)}</span>` : `<span style="color:var(--muted)">—</span>`;
+function renderCmp(){
+  const rows = CMP.rows.filter(r => !cmpFilter || r.Result === cmpFilter);
+  $("#cmpTable").innerHTML = `<div class="trow head"><div>Type</div><div>What SAP says</div><div>SAP</div><div></div><div>Ours</div><div>Our finding</div><div>Result</div></div>` +
+    rows.map(r => { const ref = r["Reviewer note: refs"]; return `<div class="trow">
+      <div class="hide-m" style="color:var(--muted)">${esc(r["SAP list"])}</div>
+      <div style="grid-column:span 1"><b style="font-weight:600">${esc(r["What SAP says"] || r["SAP topic"])}</b>${r["SAP topic"] && r["What SAP says"] ? `<div style="color:var(--muted);font-size:12px">${esc(r["SAP topic"])}</div>` : ""}</div>
+      <div>${rate(r["SAP rating"])}</div><div class="arrow hide-m">→</div><div>${rate(r["SoftwareONE rating"])}</div>
+      <div class="hide-m">${r["Our finding"] ? esc(r["Our finding"]) + (ref ? "<br>" + ref.split(/[,;\s]+/).filter(Boolean).map(refChip).join(" ") : "") : '<span style="color:var(--muted)">—</span>'}</div>
+      <div><span class="res" style="--c:${RES_C[r.Result]||"var(--muted)"}">${esc(r.Result)}</span></div>
+      <div class="exp">${esc(r.Explanation)}${r["Report section"] ? `<br><small>Report section: ${esc(r["Report section"])} · Sure: ${esc(r["How sure we are"]||"—")}</small>` : ""}</div></div>`; }).join("");
+}
+$("#cmpTable").onclick = e => { if(e.target.closest(".ref")) return; e.target.closest(".trow:not(.head)")?.classList.toggle("open"); };
+renderCmp();
+
+/* ---------- heatmap ---------- */
+const HM = DATA.heatmap; let hmOnly = true;
+$("#hmNote").textContent = HM.note + " Click a coloured cell to see those findings.";
+$("#hmLegend").innerHTML = SEV_ORDER.map(s => `<span style="--c:${SEV[s]}">${s}</span>`).join("");
+const maxN = Math.max(...HM.rows.filter(r => r.section !== "Total" && r.section !== "Other").flatMap(r => r.cells.map(c => c.n)), 1);
+function renderHM(){
+  const rows = HM.rows.filter(r => r.section !== "Total" && (!hmOnly || r.total));
+  const total = HM.rows.find(r => r.section === "Total");
+  const tr = (r, cls="") => `<tr class="${cls}"><td class="sec" title="${esc(r.section)}">${esc(r.section)} ${r.sap ? rate(r.sap) : ""}</td>` +
+    r.cells.map((c,i) => c.n ? `<td class="cell has" data-s="${esc(r.section)}" data-r="${esc(HM.risks[i])}" style="--c:${SEV[c.sev]||"var(--accent)"};--a:${Math.min(c.n/maxN,1).toFixed(2)}">${c.n}</td>` : `<td class="cell none"></td>`).join("") +
+    `<td class="tot">${r.total || "—"}</td></tr>`;
+  $("#hmTable").innerHTML = `<tr><th>Section</th>${HM.risks.map(r => `<th>${esc(r)}</th>`).join("")}<th>Findings</th></tr>` + rows.map(r => tr(r)).join("") + (total ? tr(total, "total") : "");
+}
+$("#hmOnly").onclick = e => { hmOnly = !hmOnly; e.target.classList.toggle("on", hmOnly); renderHM(); };
+$("#hmTable").onclick = e => { const c = e.target.closest(".cell.has"); if(!c) return;
+  const s = c.dataset.s; setFilter({risk:c.dataset.r, section: ["Other","Total"].includes(s) || !F.some(f => f.Section === s) ? "" : s}); };
+renderHM();
+
+/* ---------- chrome ---------- */
+$("#foot").textContent = `Built from ${DATA.source} · ${F.length} findings · ${CMP.rows.length} SAP ratings compared`;
+const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && e.target.classList.add("vis")), {threshold:.08});
+document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+const tabs = [...document.querySelectorAll("nav a.tab")];
+const so = new IntersectionObserver(es => es.forEach(e => { if(e.isIntersecting) tabs.forEach(t => t.classList.toggle("on", t.hash === "#" + e.target.id)); }), {rootMargin:"-40% 0px -55% 0px"});
+document.querySelectorAll("main section").forEach(s => so.observe(s));
+$("#theme").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "light" ? "dark" : "light"; };
+</script>
+</body>
+</html>

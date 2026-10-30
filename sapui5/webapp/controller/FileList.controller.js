@@ -180,6 +180,7 @@ sap.ui.define([
                             statusText: sStatusText,
                             statusHint: sStatusHint,
                             statusMessage: sStatusMessage,
+                            hasExplorer: !!oFile.explorer_available,
                             uploadDate: oFile.last_modified ? new Date(oFile.last_modified) : null,
                             reportDate: oFile.report_date ? new Date(oFile.report_date) : null,
                             reportYear: oFile.report_date ? new Date(oFile.report_date).getFullYear() : null,
@@ -594,6 +595,13 @@ sap.ui.define([
             var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
             var sWorkbookName = sBaseName + "_workbook.xlsx";
             window.open(Config.getDownloadUrl(sWorkbookName), "_blank");
+        },
+
+        onOpenExplorerPress: function (oEvent) {
+            var oItem = oEvent.getSource().getBindingContext("files").getObject();
+            var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
+            var sExplorerName = sBaseName + "_explorer.html";
+            window.open(Config.getDownloadUrl(sExplorerName), "_blank");
         },
 
         onChatPress: function (oEvent) {

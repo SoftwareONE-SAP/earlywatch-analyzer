@@ -293,6 +293,7 @@ async def list_files(_user: dict = Depends(require_auth())):
         json_files: Dict[str, bool] = {}
         normalized_files: Dict[str, bool] = {}
         ai_analyzed_files: Dict[str, bool] = {}
+        explorer_files: Dict[str, bool] = {}
 
         for blob in blob_list:
             name_low = blob.name.lower()
@@ -304,6 +305,9 @@ async def list_files(_user: dict = Depends(require_auth())):
                     ai_analyzed_files[base_name[:-3]] = True  # strip _AI
                 elif base_name.endswith("_workbook_payload"):
                     ai_analyzed_files[base_name[:-17]] = True  # strip _workbook_payload
+            elif name_low.endswith("_explorer.html"):
+                explorer_files[blob.name[:-len("_explorer.html")]] = True
+                continue
             elif ext in {".htm", ".html"}:
                 normalized_files[base_name] = True
                 if base_name.endswith("_AI"):
@@ -334,7 +338,9 @@ async def list_files(_user: dict = Depends(require_auth())):
                 or name_low.endswith("_v2_usage.json")
             ):
                 continue  # skip V2 workbook artifacts from main listing
-                
+            if name_low.endswith("_explorer.html"):
+                continue  # the interactive page is flagged on its run, not listed
+
             # If it's a normalized file with a corresponding original upload, avoid duplicates.
             if name_low.endswith((".html", ".htm")) and base_name in original_uploads:
                 continue
@@ -362,6 +368,7 @@ async def list_files(_user: dict = Depends(require_auth())):
                 "system_id": system_id,
                 "processed": processed,
                 "ai_analyzed": ai_analyzed,
+                "explorer_available": base_name in explorer_files,
                 "processing": is_processing,  # Add processing flag
                 "last_status": last_status,
                 "last_error_status_code": metadata.get("last_error_status_code"),
@@ -460,7 +467,7 @@ async def delete_analysis(
         _DERIVATIVE_SUFFIXES = (
             ".html", ".htm", ".json", ".xlsx",
             "_workbook.xlsx", "_workbook_payload.json",
-            "_v2_usage.json",
+            "_v2_usage.json", "_explorer.html",
         )
         allowed_blob_names = {file_name} | {f"{base_name}{s}" for s in _DERIVATIVE_SUFFIXES}
 
@@ -542,10 +549,21 @@ async def download_file(
 
         disposition = "attachment" if blob_name.endswith(".xlsx") else "inline"
 
+        headers = {"Content-Disposition": f"{disposition}; filename=\"{blob_name}\""}
+        if blob_name.endswith("_explorer.html"):
+            content_type = "text/html; charset=utf-8"
+            headers["Content-Security-Policy"] = (
+                "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+                "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src https://fonts.gstatic.com; img-src data:; connect-src 'none'"
+            )
+            headers["X-Content-Type-Options"] = "nosniff"
+            headers["Cache-Control"] = "no-store"
+
         return Response(
             content=content,
             media_type=content_type,
-            headers={"Content-Disposition": f"{disposition}; filename=\"{blob_name}\""},
+            headers=headers,
         )
 
     except HTTPException:
