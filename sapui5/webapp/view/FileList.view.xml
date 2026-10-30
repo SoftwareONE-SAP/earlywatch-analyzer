@@ -230,6 +230,13 @@
                                         class="sapUiTinyMarginBegin"
                                         visible="{= ${files>status} === 'Analyzed' || ${files>status} === 'completed' }"/>
                                     <Button
+                                        tooltip="Open interactive report"
+                                        icon="sap-icon://chart-table-view"
+                                        type="Transparent"
+                                        press=".onOpenExplorerPress"
+                                        class="sapUiTinyMarginBegin"
+                                        visible="{= (${files>status} === 'Analyzed' || ${files>status} === 'completed') &amp;&amp; ${files>hasExplorer} === true }"/>
+                                    <Button
                                         tooltip="{i18n>process}"
                                         icon="sap-icon://activate"
                                         type="Transparent"

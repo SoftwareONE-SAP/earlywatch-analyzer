@@ -218,6 +218,12 @@ every per-source finding. Sections that could not be analysed show as a line on
 Priority Actions; the task and coverage details stay in the saved result JSON.
 Partial section coverage is marked Unknown and zero successful sections fail.
 
+Each new run also writes `<name>_explorer.html`, an interactive single-page view
+of the same data (top actions, findings with a detail panel, SAP comparison and
+heatmap). It is uploaded next to the workbook and appears as an "Open interactive
+report" button in the file list. Runs created before this change have no page,
+so they show no button.
+
 See [the October 19 grouping deployment record](deployment/cli-grouping-20261019.md)
 for the current values, verification, and source/image provenance.
 | `AUTH_ENABLED` / `TRUST_PLATFORM_AUTH_HEADERS` | Entra authentication behaviour in hosted environments. |

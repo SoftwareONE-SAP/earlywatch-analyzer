@@ -23,6 +23,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from azure.core.exceptions import ResourceNotFoundError
 from core.azure_clients import (
     blob_service_client,
     AZURE_STORAGE_CONTAINER_NAME,
@@ -184,6 +185,7 @@ class EWAWorkflowOrchestrator:
                 "workbook_file": artifact_names.get("workbook"),
                 "workbook_payload_file": artifact_names.get("payload"),
                 "usage_file": artifact_names.get("usage"),
+                "explorer_file": artifact_names.get("explorer"),
                 "total_findings": result.get("total_findings", 0),
                 "total_parameters": 0,
                 "supplemental_findings": 0,
@@ -284,6 +286,14 @@ class EWAWorkflowOrchestrator:
                 if artifacts.cost_path.exists():
                     result["cost_json"] = artifacts.cost_path.read_text(encoding="utf-8")
 
+                explorer_path = getattr(artifacts, "explorer_path", None)
+                if explorer_path is not None:
+                    try:
+                        if explorer_path.exists():
+                            result["explorer_html"] = explorer_path.read_text(encoding="utf-8")
+                    except Exception as exc:
+                        logger.warning("[PIPELINE] Could not read explorer HTML: %s", exc)
+
                 # Serialize AnalysisResult to JSON for the workbook payload
                 result["payload_json"] = analysis_result.model_dump_json(indent=2)
 
@@ -343,6 +353,28 @@ class EWAWorkflowOrchestrator:
             )
             artifact_names["usage"] = usage_name
             logger.info("[UPLOAD] Uploaded usage: %s", usage_name)
+
+        # Explorer page: best effort, never fails the run
+        explorer_name = f"{base_name}_explorer.html"
+        try:
+            blob_client = container_client.get_blob_client(explorer_name)
+            if result.get("explorer_html"):
+                await asyncio.to_thread(
+                    blob_client.upload_blob,
+                    result["explorer_html"].encode("utf-8"),
+                    overwrite=True,
+                    content_type="text/html; charset=utf-8",
+                )
+                artifact_names["explorer"] = explorer_name
+                logger.info("[UPLOAD] Uploaded explorer: %s", explorer_name)
+            else:
+                # Remove a stale page from an earlier run so it cannot disagree with the new workbook
+                try:
+                    await asyncio.to_thread(blob_client.delete_blob)
+                except ResourceNotFoundError:
+                    pass
+        except Exception as exc:
+            logger.warning("[UPLOAD] Explorer page step failed for %s: %s", explorer_name, exc)
 
         return artifact_names
 
