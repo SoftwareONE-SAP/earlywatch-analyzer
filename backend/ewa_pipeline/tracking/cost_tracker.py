@@ -28,6 +28,25 @@ OPENAI_FALLBACK_PRICING: dict[str, dict[str, float]] = {
         "cache_write_per_1m": 0.25,
         "output_per_1m": 1.20,
     },
+    # Claude on Azure AI Foundry; third-party listings, verify against Azure Marketplace; config.yaml pricing overrides.
+    "claude-opus-5-5": {
+        "input_per_1m": 4.00,
+        "cached_input_per_1m": 0.40,
+        "cache_write_per_1m": 5.00,
+        "output_per_1m": 20.00,
+    },
+    "claude-sonnet-5-5": {
+        "input_per_1m": 2.00,
+        "cached_input_per_1m": 0.20,
+        "cache_write_per_1m": 2.50,
+        "output_per_1m": 10.00,
+    },
+    "claude-haiku-5-5": {
+        "input_per_1m": 0.10,
+        "cached_input_per_1m": 0.01,
+        "cache_write_per_1m": 0.125,
+        "output_per_1m": 0.50,
+    },
     # The unqualified alias routes to Sol.
     "gpt-5.6": {
         "input_per_1m": 5.00,
