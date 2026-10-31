@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
 
 
@@ -43,6 +43,30 @@ class ReasoningConfig(BaseModel):
         return value
 
 
+Provider = Literal["azure_openai", "foundry_claude"]
+Role = Literal["orchestrator", "specialist", "cross_reference", "synthesis"]
+
+
+class ProvidersConfig(BaseModel):
+    orchestrator: Provider = "azure_openai"
+    specialist: Provider = "azure_openai"
+    cross_reference: Provider | None = None
+    synthesis: Provider | None = None
+
+    @field_validator("orchestrator", "specialist", "cross_reference", "synthesis", mode="before")
+    @classmethod
+    def _normalise_provider(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower() or None
+        return value
+
+
+class ClaudeConfig(BaseModel):
+    endpoint: str = ""  # https://<resource>.services.ai.azure.com/anthropic
+    api_key: str = ""
+    max_output_tokens: int = Field(32000, ge=1)
+
+
 class ModelPrice(BaseModel):
     input_per_1m: float = 0.0   # USD per million input tokens
     cached_input_per_1m: float | None = None  # USD per million cached input tokens
@@ -53,6 +77,8 @@ class ModelPrice(BaseModel):
 class Config(BaseModel):
     azure_openai: AzureConfig
     reasoning: ReasoningConfig
+    providers: ProvidersConfig = ProvidersConfig()
+    claude: ClaudeConfig = ClaudeConfig()
     pricing: dict[str, ModelPrice] = {}
     request_timeout_seconds: int = Field(default=180, ge=1)
     planning_timeout_seconds: int | None = Field(default=None, ge=1)
@@ -72,6 +98,25 @@ class Config(BaseModel):
         deployment = getattr(self.azure_openai.deployments, role)
         effort = getattr(self.reasoning, role)
         return deployment or self.azure_openai.deployments.orchestrator, effort or self.reasoning.orchestrator
+
+    def provider_for(self, role: Role) -> Provider:
+        own = getattr(self.providers, role, None)
+        if own:
+            return own
+        if getattr(self.azure_openai.deployments, role, None):
+            return "azure_openai"
+        return self.providers.orchestrator
+
+    @model_validator(mode="after")
+    def _claude_needs_credentials(self):
+        roles = ("orchestrator", "specialist", "cross_reference", "synthesis")
+        uses_claude = any(self.provider_for(role) == "foundry_claude" for role in roles)
+        if uses_claude and not (self.claude.endpoint.strip() and self.claude.api_key.strip()):
+            raise ValueError(
+                "A role uses foundry_claude, so AZURE_ANTHROPIC_ENDPOINT and "
+                "AZURE_ANTHROPIC_API_KEY must both be set."
+            )
+        return self
 
     def pricing_dict(self) -> dict[str, dict[str, float]]:
         """Return pricing in the flat format CostTracker expects."""
@@ -117,6 +162,23 @@ def _reasoning_env() -> dict[str, str | None]:
             "Missing required reasoning environment variables: " + ", ".join(missing)
         )
     return values
+
+
+def _providers_env() -> dict[str, str]:
+    return {
+        role: value
+        for role in ("orchestrator", "specialist", "cross_reference", "synthesis")
+        if (value := _first_env(f"{role.upper()}_PROVIDER"))
+    }
+
+
+def _claude_env() -> dict[str, str]:
+    names = {
+        "endpoint": "AZURE_ANTHROPIC_ENDPOINT",
+        "api_key": "AZURE_ANTHROPIC_API_KEY",
+        "max_output_tokens": "ANTHROPIC_MAX_OUTPUT_TOKENS",
+    }
+    return {key: value for key, name in names.items() if (value := _first_env(name))}
 
 
 def _runtime_env() -> dict[str, str]:
@@ -169,6 +231,8 @@ def _build_env_config() -> Config:
                 },
             },
             "reasoning": reasoning,
+            "providers": _providers_env(),
+            "claude": _claude_env(),
             "pricing": {},
             **_runtime_env(),
         }
@@ -193,6 +257,8 @@ def load_config(path: Path | None = None) -> Config:
         deployments = data["azure_openai"]["deployments"]
         deployments.setdefault("cross_reference", _first_env("CROSS_REFERENCE_MODEL") or None)
         deployments.setdefault("synthesis", _first_env("SYNTHESIS_MODEL") or None)
+        data["providers"] = {**_providers_env(), **(data.get("providers") or {})}
+        data["claude"] = {**_claude_env(), **(data.get("claude") or {})}
         data = {**_runtime_env(), **data}
         return Config.model_validate(data)
 

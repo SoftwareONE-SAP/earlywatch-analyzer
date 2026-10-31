@@ -37,7 +37,6 @@ Required for the backend:
 | --- | --- |
 | `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage access. Prefer Azure secrets or Key Vault over files. |
 | `AZURE_STORAGE_CONTAINER_NAME` | Blob container used for uploads and outputs. |
-| `PROVIDER` | `openai` or `anthropic`. |
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI or Azure AI Services endpoint. |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key. |
 | `AZURE_OPENAI_API_VERSION` | API version used by the SDK. |
@@ -65,13 +64,18 @@ Direct JWT validation variables remain available for deployments where the front
 | `ENTRA_API_AUDIENCE` | Optional custom audience override. |
 | `ENTRA_ISSUER` | Optional issuer override. |
 
-Optional Anthropic-on-Azure variables:
+Optional Claude-on-Azure variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `AZURE_ANTHROPIC_ENDPOINT` | Azure AI Foundry Anthropic endpoint. |
-| `AZURE_ANTHROPIC_API_KEY` | Anthropic provider key. |
-| `ANTHROPIC_SUMMARY_MODEL` | Legacy summary model. |
+| `ORCHESTRATOR_PROVIDER`, `SPECIALIST_PROVIDER` | Optional. `azure_openai` (default) or `foundry_claude` to run that role on Claude. |
+| `CROSS_REFERENCE_PROVIDER`, `SYNTHESIS_PROVIDER` | Optional. Default: `azure_openai` if the role has its own `*_MODEL`, otherwise the orchestrator's provider. |
+| `CHAT_PROVIDER` | Optional. `azure_openai` (default) or `foundry_claude`. |
+| `AZURE_ANTHROPIC_ENDPOINT` | Claude endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
+| `AZURE_ANTHROPIC_API_KEY` | Claude API key (`<set-in-secret-store>`; use a secret store or Key Vault reference only). |
+| `ANTHROPIC_MAX_OUTPUT_TOKENS` | Optional, default 32000. Claude needs a maximum answer length, and thinking counts toward it. |
+
+Claude is optional and nothing changes if these are unset. Put the Claude deployment name (for example `claude-sonnet-5-5`) in the existing `*_MODEL` / `CHAT_MODEL` setting. Azure OpenAI settings are still required (Decision-1 uses them). `CHAT_MAX_OUTPUT_TOKENS` may need raising when chat uses Claude with thinking on.
 
 ## Authentication Model
 

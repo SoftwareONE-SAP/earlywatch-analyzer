@@ -158,7 +158,6 @@ All configuration is via environment variables — see `.env.example` for the fu
 |---|---|
 | `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage access (prefer Key Vault / platform secrets). |
 | `AZURE_STORAGE_CONTAINER_NAME` | Blob container for uploads and outputs. |
-| `PROVIDER` | `openai` or `anthropic`. |
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_API_VERSION` | Model endpoint and credentials. |
 | `ORCHESTRATOR_MODEL` | Required planner deployment; default for cross-reference and synthesis. |
 | `SPECIALIST_MODEL` | Required deployment for parallel domain analysts. |
@@ -179,6 +178,14 @@ All configuration is via environment variables — see `.env.example` for the fu
 | `DECISION_MODEL` | Decision-1 model name, default `Decision-1`. |
 | `DECISION_KEEP` / `DECISION_POSSIBLE` | Score at or above `DECISION_KEEP` (default 0.85) counts as a match; at or above `DECISION_POSSIBLE` (default 0.5) is shown as "please check". |
 | `DECISION_WORKERS` / `DECISION_BUDGET_SECONDS` | Parallel calls (default 8) and the most time spent per report (default 300 seconds). |
+| `ORCHESTRATOR_PROVIDER`, `SPECIALIST_PROVIDER` | Optional. `azure_openai` (default) or `foundry_claude` to run that role on Claude. |
+| `CROSS_REFERENCE_PROVIDER`, `SYNTHESIS_PROVIDER` | Optional. Default: `azure_openai` if the role has its own `*_MODEL`, otherwise the orchestrator's provider. |
+| `CHAT_PROVIDER` | Optional. `azure_openai` (default) or `foundry_claude`. |
+| `AZURE_ANTHROPIC_ENDPOINT` | Claude endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
+| `AZURE_ANTHROPIC_API_KEY` | Claude API key (`<set-in-secret-store>`; use a secret store or Key Vault reference only). |
+| `ANTHROPIC_MAX_OUTPUT_TOKENS` | Optional, default 32000. Claude needs a maximum answer length, and thinking counts toward it. |
+
+Claude is optional and nothing changes if these are unset. Put the Claude deployment name (for example `claude-sonnet-5-5`) in the existing `*_MODEL` / `CHAT_MODEL` setting. Azure OpenAI settings are still required (Decision-1 uses them). `CHAT_MAX_OUTPUT_TOKENS` may need raising when chat uses Claude with thinking on.
 
 **Heading check.** Decision-1 matches on topic, so it can pick a sibling finding. When it picks a finding, a plain-Python check re-ranks its own scores: if another candidate (score at or above `DECISION_POSSIBLE`) sits under a report heading, its own or a parent one, that repeats SAP's alert wording, and the first pick does not, the report uses that candidate instead. The row is marked "Medium" confidence and names the first pick as "also close, please check". It makes no extra AI calls. To compare results with and without it on saved scores, without any AI calls or output files, run this from `backend/`:
 

@@ -79,18 +79,35 @@ async def chat_with_document(
         if not model_name:
             raise HTTPException(status_code=500, detail="CHAT_MODEL is not configured.")
         reasoning_effort = get_reasoning_effort("CHAT_REASONING_EFFORT")
-        logger.info("Azure endpoint set: %s, model: %s", bool(azure_endpoint), model_name)
+        provider = (os.getenv("CHAT_PROVIDER") or "").strip().lower() or "azure_openai"
+        if provider not in ("azure_openai", "foundry_claude"):
+            raise HTTPException(
+                status_code=500,
+                detail="CHAT_PROVIDER must be 'azure_openai' or 'foundry_claude'.",
+            )
+        logger.info("Chat provider: %s, model: %s", provider, model_name)
 
-        if not api_key or not azure_endpoint:
-            raise HTTPException(status_code=500, detail="Azure OpenAI environment variables missing.")
+        client = None
+        if provider == "foundry_claude":
+            claude_endpoint = (os.getenv("AZURE_ANTHROPIC_ENDPOINT") or "").strip()
+            claude_key = (os.getenv("AZURE_ANTHROPIC_API_KEY") or "").strip()
+            if not claude_key or not claude_endpoint:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Claude (Azure AI Foundry) environment variables missing.",
+                )
+        else:
+            logger.info("Azure endpoint set: %s", bool(azure_endpoint))
+            if not api_key or not azure_endpoint:
+                raise HTTPException(status_code=500, detail="Azure OpenAI environment variables missing.")
 
-        from openai import AzureOpenAI  # local import to keep module import light
+            from openai import AzureOpenAI  # local import to keep module import light
 
-        client = AzureOpenAI(
-            api_key=api_key,
-            api_version=api_version,
-            azure_endpoint=azure_endpoint,
-        )
+            client = AzureOpenAI(
+                api_key=api_key,
+                api_version=api_version,
+                azure_endpoint=azure_endpoint,
+            )
 
         # Keep only recent history and reuse for retrieval + answer generation.
         recent_history = (
@@ -144,6 +161,24 @@ async def chat_with_document(
             raise HTTPException(status_code=400, detail="Document content is missing. Please process the document first.")
 
         system_instruction = _build_system_prompt(request.fileName, selected_doc_context)
+
+        if provider == "foundry_claude":
+            try:
+                answer = await asyncio.to_thread(
+                    _claude_reply,
+                    endpoint=claude_endpoint,
+                    api_key=claude_key,
+                    model_name=model_name,
+                    system_instruction=system_instruction,
+                    history=recent_history,
+                    question=request.message,
+                    reasoning_effort=reasoning_effort,
+                )
+                return {"response": answer}
+            except Exception as api_err:
+                logger.exception("Claude API error: %s", api_err)
+                err_text = _humanize_openai_error(api_err, model_name, provider)
+                raise HTTPException(status_code=500, detail=f"Claude API error: {err_text}")
 
         # Build Responses API input messages with selected node context and chat history.
         responses_messages = []
@@ -241,13 +276,74 @@ def _build_system_prompt(filename: str, doc_content: str) -> str:
     )
 
 
-def _humanize_openai_error(err: Exception, model_name: str) -> str:
+def _claude_messages(history: List[Dict[str, Any]], question: str) -> List[Dict[str, str]]:
+    """Build Claude messages: alternating roles, starting with user, no empty texts."""
+    messages: List[Dict[str, str]] = []
+    items = [("user" if m.get("isUser") else "assistant", m.get("text") or "") for m in history]
+    items.append(("user", question or ""))
+    for role, text in items:
+        if not text.strip():
+            continue
+        if not messages and role != "user":
+            continue  # Claude needs the first message to be from the user
+        if messages and messages[-1]["role"] == role:
+            messages[-1]["content"] += "\n\n" + text
+        else:
+            messages.append({"role": role, "content": text})
+    return messages
+
+
+def _claude_reply(
+    *,
+    endpoint: str,
+    api_key: str,
+    model_name: str,
+    system_instruction: str,
+    history: List[Dict[str, Any]],
+    question: str,
+    reasoning_effort: str,
+) -> str:
+    """Ask a Claude model on Azure AI Foundry and return the answer text (blocking call)."""
+    from anthropic import AnthropicFoundry  # local import to keep module import light
+
+    client = AnthropicFoundry(api_key=api_key, base_url=endpoint)
+    if reasoning_effort in ("none", "minimal"):
+        thinking: Dict[str, Any] = {"type": "disabled"}
+        effort = "low"
+    else:
+        thinking = {"type": "adaptive"}
+        effort = reasoning_effort
+    response = client.messages.create(
+        model=model_name,
+        system=system_instruction,
+        messages=_claude_messages(history, question),
+        max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        thinking=thinking,
+        output_config={"effort": effort},
+    )
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        logger.info(
+            "Token usage: input_tokens=%s, output_tokens=%s",
+            getattr(usage, "input_tokens", None),
+            getattr(usage, "output_tokens", None),
+        )
+    return "".join(
+        getattr(block, "text", "") or ""
+        for block in (response.content or [])
+        if getattr(block, "type", None) == "text"
+    )
+
+
+def _humanize_openai_error(err: Exception, model_name: str, provider: str = "azure_openai") -> str:
     txt = str(err).lower()
     if "not found" in txt and "model" in txt:
         return f"Model '{model_name}' not found. Please check configuration."
     if "deploymentnotfound" in txt or "deployment not found" in txt:
         return f"Deployment '{model_name}' not found. Verify Azure deployment name and AZURE_OPENAI_* environment variables."
     if "authenticate" in txt or "key" in txt:
+        if provider == "foundry_claude":
+            return "Authentication error. Please check Claude (Azure AI Foundry) API key and endpoint."
         return "Authentication error. Please check Azure OpenAI API key and endpoint."
     if "rate limit" in txt:
         return "Rate limit exceeded. Please try again later."

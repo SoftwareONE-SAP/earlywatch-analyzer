@@ -25,7 +25,7 @@ from langgraph.types import Send
 
 from ewa_pipeline.config import Config
 from ewa_pipeline.models import (
-    get_orchestrator_model, get_subagent_model, get_cross_ref_model, get_synthesis_model,
+    get_orchestrator_model, get_subagent_model, get_cross_ref_model, get_synthesis_model, structured,
 )
 from ewa_pipeline.tracking.cost_tracker import CostTracker
 from ewa_pipeline.report.schemas import (
@@ -240,22 +240,12 @@ def build_ewa_graph(
     cross_reference_deployment, _ = config.model_settings("cross_reference")
     synthesis_deployment, _ = config.model_settings("synthesis")
 
-    planner_chain = get_orchestrator_model(config).with_structured_output(
-        OrchestratorPlan, include_raw=True
-    )
+    planner_chain = structured(get_orchestrator_model(config), OrchestratorPlan)
     specialist_model = get_subagent_model(config)
-    domain_chain = specialist_model.with_structured_output(
-        DomainAnalysis, include_raw=True
-    )
-    grouped_chain = specialist_model.with_structured_output(
-        GroupedDomainAnalysis, include_raw=True
-    )
-    xref_chain = get_cross_ref_model(config).with_structured_output(
-        CrossReferenceList, include_raw=True
-    )
-    synth_chain = get_synthesis_model(config).with_structured_output(
-        SynthesisResult, include_raw=True
-    )
+    domain_chain = structured(specialist_model, DomainAnalysis)
+    grouped_chain = structured(specialist_model, GroupedDomainAnalysis)
+    xref_chain = structured(get_cross_ref_model(config), CrossReferenceList)
+    synth_chain = structured(get_synthesis_model(config), SynthesisResult)
 
     # ── Node: planner ────────────────────────────────────────────────────────
 
