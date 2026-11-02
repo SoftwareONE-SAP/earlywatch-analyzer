@@ -5,6 +5,7 @@ import re
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -155,6 +156,24 @@ class WholeWorkbookStyleTests(unittest.TestCase):
                 self.assertLessEqual(int(m.group(3)), self.wb[m.group(1)].max_row, where)
                 if m.group(1) == "Findings":  # a link into Findings lands on a finding's row
                     self.assertIn(self.wb["Findings"][f"A{m.group(3)}"].value, finding_ids, where)
+
+
+class ExcelRepairPromptTests(unittest.TestCase):
+    """Excel asks to repair a file when a rich-text run is only whitespace and lacks xml:space="preserve"."""
+
+    def test_no_whitespace_only_text_element_without_the_preserve_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.xlsx"
+            generate(full_result(), path)
+            with zipfile.ZipFile(path) as z:  # raw XML: reading back with openpyxl does not notice the fault
+                sheets = {n: z.read(n).decode("utf-8") for n in z.namelist()
+                          if n.startswith("xl/worksheets/") and n.endswith(".xml")}
+        self.assertTrue(sheets)
+        pattern = re.compile(r"<t(?P<attrs>[^>]*)>(?P<text>\s+)</t>")
+        for name, xml in sheets.items():
+            for m in pattern.finditer(xml):
+                self.assertIn('xml:space="preserve"', m.group("attrs"), f"{name}: {m.group(0)!r}")
+        self.assertIn("Why it matters together", "".join(sheets.values()))
 
 
 class ExactTabListTests(unittest.TestCase):

@@ -282,11 +282,11 @@ def _risk_text(xr: CrossReference):
         return text, text
     blocks = []
     for n, (label, body, bold) in enumerate(parts):
-        if n:
-            blocks.append(TextBlock(xs._inline(xs.TEXT), "\n"))
+        gap = "\n" if n else ""  # rides on the next run: Excel rejects a run of only whitespace
         if label:
-            blocks.append(TextBlock(xs._inline(xs.TEXT, bold=True), label))
-        blocks.append(TextBlock(xs._inline(xs.TEXT, bold=bold), body))
+            blocks.append(TextBlock(xs._inline(xs.TEXT, bold=True), gap + label))
+            gap = ""
+        blocks.append(TextBlock(xs._inline(xs.TEXT, bold=bold), gap + body))
     return CellRichText(*blocks), text
 
 
@@ -490,9 +490,12 @@ def _legend(label, items):
         return label + "   ".join(str(item) for item in items)
     blocks = [TextBlock(xs._inline(xs.NOTE), label)]
     for i, item in enumerate(items):
-        if i:
-            blocks.append(TextBlock(xs._inline(xs.TEXT), "    "))
-        blocks.extend(item)
+        runs = list(item)
+        if i:  # the gap rides on the item's first run: Excel rejects a run of only whitespace
+            first = runs[0]
+            runs[0] = (TextBlock(first.font, "    " + first.text) if isinstance(first, TextBlock)
+                       else TextBlock(xs._inline(xs.TEXT), "    " + first))
+        blocks.extend(runs)
     return CellRichText(*blocks)
 
 
