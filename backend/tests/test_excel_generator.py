@@ -496,7 +496,7 @@ class PriorityActionsTests(unittest.TestCase):
         parts = [p for p in value if not isinstance(p, str)]
         self.assertTrue(parts[0].font.b)
         self.assertEqual(parts[0].text, "Old kernel and slow SQL")
-        self.assertTrue(any(p.text == "What to do: " and p.font.b for p in parts))
+        self.assertTrue(any(p.text.lstrip("\n") == "What to do: " and p.font.b for p in parts))
 
     def test_no_cross_references_means_no_block(self):
         texts = self._texts(self._sheet(build_result()))
