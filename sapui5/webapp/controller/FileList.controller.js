@@ -347,8 +347,7 @@ sap.ui.define([
                         }
                     });
                     if (aWarnings.length > 0) {
-                        MessageBox.warning(aWarnings.join("
-"));
+                        MessageBox.warning(aWarnings.join("\n"));
                     }
 
                     this._loadFiles();
