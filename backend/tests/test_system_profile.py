@@ -70,6 +70,15 @@ class UnitTests(unittest.TestCase):
         self.assertEqual((p.period_start, p.period_end), ("2026-04-27", "2026-05-03"))
         self.assertEqual(p.sources["period_start"], "hardware_capacity")
 
+    def test_tables_with_title_row(self):
+        html = (
+            "<table><tr><td>Product</td></tr>"
+            "<tr><td>System</td><td>SAP Product</td><td>Product Version</td></tr>"
+            "<tr><td>TP100002~ABAP</td><td>SAP NetWeaver</td><td>7.4</td></tr></table>"
+        )
+        p = extract_system_profile(html)
+        self.assertEqual((p.product, p.product_version), ("SAP NetWeaver", "7.4"))
+
     def test_headings_fallback_ignores_sap(self):
         p = extract_system_profile("<h2>Indicators for TP1</h2><h2>Checks for TP1</h2><h2>Maintenance for SAP</h2>")
         self.assertEqual(p.sid, "TP1")
