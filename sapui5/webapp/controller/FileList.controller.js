@@ -259,7 +259,7 @@ sap.ui.define([
 
         handleTypeMissmatch: function (oEvent) {
             var sFileName = oEvent.getParameter("fileName");
-            MessageToast.show("Only DOC files are supported" + (sFileName ? ": " + sFileName : ""));
+            MessageToast.show("Only DOC, HTM and HTML files are supported" + (sFileName ? ": " + sFileName : ""));
         },
 
         onUploadPress: function () {
@@ -338,6 +338,17 @@ sap.ui.define([
                     if (iFailed > 0) {
                         MessageBox.error(iFailed + " file" + (iFailed > 1 ? "s" : "") + " failed to upload. Please check the console for details.");
                         console.error("Upload failures:", results.filter(r => r.status === "rejected").map(r => r.reason));
+                    }
+
+                    var aWarnings = [];
+                    results.forEach(function (r) {
+                        if (r.status === "fulfilled" && r.value && r.value.warnings && r.value.warnings.length) {
+                            aWarnings = aWarnings.concat(r.value.warnings);
+                        }
+                    });
+                    if (aWarnings.length > 0) {
+                        MessageBox.warning(aWarnings.join("
+"));
                     }
 
                     this._loadFiles();

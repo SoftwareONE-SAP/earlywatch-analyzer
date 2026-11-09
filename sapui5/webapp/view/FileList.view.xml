@@ -33,9 +33,9 @@
                                     change=".onFileChange"
                                     typeMissmatch=".handleTypeMissmatch"
                                     style="Emphasized"
-                                    fileType="doc"
+                                    fileType="doc,htm,html"
                                     width="22rem"
-                                    placeholder="Choose DOC file..."
+                                    placeholder="Choose DOC or HTM file..."
                                     class="sapUiSmallMarginEnd"/>
                                 <Button text="{i18n>uploadButton}" type="Emphasized" press=".onUploadPress" icon="sap-icon://upload"/>
                             </HBox>
