@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 FILENAME_YEAR_CUTOFF = 30
 FILENAME_YEAR_2000_OFFSET = 2000
 FILENAME_YEAR_1900_OFFSET = 1900
-SUPPORTED_UPLOAD_EXTENSIONS = (".doc",)
+SUPPORTED_UPLOAD_EXTENSIONS = (".doc", ".htm", ".html")
+HTML_UPLOAD_EXTENSIONS = (".htm", ".html")
 
 # ---------------------------------------------------------------------------
 # Filename validation and metadata extraction
@@ -177,28 +178,46 @@ async def upload_file(
     if not file_name_lower.endswith(SUPPORTED_UPLOAD_EXTENSIONS):
         raise HTTPException(
             status_code=400,
-            detail="Only .doc files are supported.",
+            detail="Only .doc, .htm and .html files are supported.",
         )
 
     try:
         import tempfile
-        from converters.compact_html_converter import convert_html_to_compact_html
+        from converters.compact_html_converter import (
+            convert_html_to_compact_html,
+            count_unresolved_images,
+        )
         from converters.doc_html_converter import convert_doc_to_html
         
         contents = await file.read()
         
         with tempfile.TemporaryDirectory() as temp_dir:
-            uploaded_path = os.path.join(temp_dir, file.filename)
+            is_html_upload = file_name_lower.endswith(HTML_UPLOAD_EXTENSIONS)
+            # Keep only the file name: a client could send "..\..\x.htm" or "a/b.htm".
+            safe_name = os.path.basename(file.filename.replace("\\", "/")) or "upload"
+            uploaded_path = os.path.join(temp_dir, safe_name)
             with open(uploaded_path, "wb") as f:
                 f.write(contents)
 
-            logger.info("Converting uploaded Word document to compact HTML: %s", uploaded_path)
-            html_path = await asyncio.to_thread(
-                convert_doc_to_html,
-                uploaded_path,
-                os.path.join(temp_dir, "doc_html"),
-                prefer_word_com=False,
-            )
+            warnings: List[str] = []
+            if is_html_upload:
+                logger.info("Converting uploaded HTML report to compact HTML: %s", uploaded_path)
+                html_path = uploaded_path
+                missing_images = await asyncio.to_thread(count_unresolved_images, html_path)
+                if missing_images > 0:
+                    stem = os.path.splitext(safe_name)[0]
+                    warnings.append(
+                        f"{missing_images} images could not be found. A Word 'Save as HTML' file "
+                        f"needs its {stem}_files folder; upload the .doc instead."
+                    )
+            else:
+                logger.info("Converting uploaded Word document to compact HTML: %s", uploaded_path)
+                html_path = await asyncio.to_thread(
+                    convert_doc_to_html,
+                    uploaded_path,
+                    os.path.join(temp_dir, "doc_html"),
+                    prefer_word_com=False,
+                )
             normalized_content = await asyncio.to_thread(convert_html_to_compact_html, html_path)
             normalized_extension = ".html"
             content_type = "text/html"
@@ -223,7 +242,7 @@ async def upload_file(
                 
             # Generate new filename based on extracted metadata.
             new_filename = generate_standardized_filename(file_metadata, file.filename)
-            blob_name = re.sub(r"\.doc$", normalized_extension, new_filename, flags=re.IGNORECASE)
+            blob_name = re.sub(r"\.(doc|html?)$", normalized_extension, new_filename, flags=re.IGNORECASE)
             
             blob_client = blob_service_client.get_blob_client(
                 container=AZURE_STORAGE_CONTAINER_NAME, blob=blob_name
@@ -258,7 +277,7 @@ async def upload_file(
                 blob_name,
                 metadata,
             )
-            return {
+            response: Dict[str, Any] = {
                 "filename": blob_name,
                 "original_filename": file.filename,  # Include original for reference
                 "customer_name": customer_name,
@@ -266,6 +285,9 @@ async def upload_file(
                 "report_date": file_metadata["report_date_str"],
                 "message": "File processed and uploaded successfully to Azure Blob Storage.",
             }
+            if warnings:
+                response["warnings"] = warnings
+            return response
 
     except HTTPException:
         # Re-raise HTTP exceptions

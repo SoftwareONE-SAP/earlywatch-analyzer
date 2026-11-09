@@ -51,6 +51,9 @@ def _find_table(soup: BeautifulSoup, *headers: str) -> list[list[str]] | None:
     """Return the rows of the first table whose first row holds all ``headers``."""
     for table in soup.find_all("table"):
         rows = _rows(table)
+        # TCC tables start with a one-cell title row before the header row.
+        if len(rows) > 1 and len(rows[0]) == 1:
+            rows = rows[1:]
         if rows and all(h in rows[0] for h in headers):
             return rows
     return None

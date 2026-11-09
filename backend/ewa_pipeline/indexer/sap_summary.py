@@ -43,6 +43,12 @@ def _rows(table: Tag) -> list[list[str]]:
 def _table_after_label(soup: BeautifulSoup, label: str) -> Tag | None:
     for tag in soup.find_all(_LABEL_TAGS):
         if _text(tag) == label:
+            # SAP's TCC export puts the label inside the table (as its title row).
+            cell = tag if tag.name in ("td", "th") else tag.find_parent(["td", "th"])
+            if cell is not None and _text(cell) == label:
+                own_table = cell.find_parent("table")
+                if own_table is not None:
+                    return own_table
             return tag.find_next("table")
     return None
 

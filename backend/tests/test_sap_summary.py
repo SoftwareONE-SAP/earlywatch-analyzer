@@ -72,10 +72,28 @@ class UnitTests(unittest.TestCase):
         check = extract_service_summary(html).checks[0]
         self.assertEqual((check.topic, check.raw_title), ("A *", "A * *"))
 
+    def test_label_inside_table_uses_that_table(self):
+        result = extract_service_summary(TCC_STYLE)
+        self.assertEqual([(a.rating, a.text) for a in result.alerts], [("RED", "TCC alert")])
+        self.assertEqual([(c.topic, c.rating) for c in result.checks], [("Security", "GREEN")])
+
     def test_missing_sections_give_empty_lists(self):
         for html in ("", "<p>Nothing here</p>", "<p>Alert Overview</p>", "<p>Check Overview</p><p>x</p>"):
             result = extract_service_summary(html)
             self.assertEqual((result.alerts, result.checks), ([], []))
+
+TCC_STYLE = """
+<table>
+<tr><td>Alert Overview</td></tr>
+<tr><td>Rating</td><td>Alert</td></tr>
+<tr><td><span data-rating="red">[RED]</span></td><td>TCC alert</td></tr>
+</table>
+<table>
+<tr><td>Check Overview</td></tr>
+<tr><td>Topic Rating</td><td>Topic</td><td>Subtopic Rating</td><td>Subtopic</td></tr>
+<tr><td>[GREEN]</td><td>Security</td><td></td><td></td></tr>
+</table>
+"""
 
 
 class SampleTests(unittest.TestCase):

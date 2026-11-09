@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import functools
 import html
+import io
 import logging
 import os
 import re
@@ -10,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from bs4 import BeautifulSoup, NavigableString, Tag
+from PIL import Image
 
 from converters.icon_classifier import (
     build_icon_map,
@@ -24,15 +29,59 @@ _BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "table", "ul", "ol", "di
 _RATING_RE = re.compile(r"^\[(GREEN|YELLOW|RED|BLUE|GRAY|NOT_RATED|GREEN_BAR|RED_BAR|YELLOW_BAR|GRAY_BAR|CHECK)\]$")
 
 
+_DATA_URI_RE = re.compile(r"^data:image/([a-z0-9.+-]+)\s*;\s*base64\s*,(.*)$", re.IGNORECASE | re.DOTALL)
+_MAX_DATA_URI_BYTES = 1_000_000
+_MAX_DATA_URI_PIXELS = 250_000
+
+
+def _is_data_uri(src: str) -> bool:
+    return src.strip().lower().startswith("data:")
+
+
 def _resolve_image_src(src: str, html_dir: str) -> Optional[str]:
-    if not src:
+    if not src or _is_data_uri(src):
         return None
     resolved = os.path.normpath(os.path.join(html_dir, src))
+    try:
+        base = os.path.normcase(os.path.abspath(html_dir))
+        if os.path.commonpath([base, os.path.normcase(os.path.abspath(resolved))]) != base:
+            return None
+    except ValueError:
+        return None
     return resolved if os.path.isfile(resolved) else None
+
+
+@functools.lru_cache(maxsize=512)
+def _classify_image_bytes(data: bytes) -> str:
+    """Classify embedded image bytes; anything unreadable or large stays [IMAGE]."""
+    if len(data) > _MAX_DATA_URI_BYTES:
+        return "[IMAGE]"
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            width, height = img.size
+            img.load()
+    except Exception:
+        return "[IMAGE]"
+    if width * height > _MAX_DATA_URI_PIXELS:
+        return "[IMAGE]"
+    return classify_icon(io.BytesIO(data))
+
+
+def _data_uri_label(src: str) -> str:
+    match = _DATA_URI_RE.match(src.strip())
+    if not match:
+        return "[IMAGE]"
+    try:
+        data = base64.b64decode(re.sub(r"\s+", "", match.group(2)), validate=True)
+    except (binascii.Error, ValueError):
+        return "[IMAGE]"
+    return _classify_image_bytes(data)
 
 
 def _image_label(img: Tag, icon_map: dict[str, str], html_dir: str) -> str:
     src = img.get("src", "")
+    if _is_data_uri(src):
+        return _data_uri_label(src)
     fname = os.path.basename(src)
     label = icon_map.get(fname)
     if label is not None:
@@ -192,3 +241,20 @@ def convert_html_to_compact_html(html_path: str | Path, output_path: str | Path 
     output_path.write_text(compact, encoding="utf-8")
     logger.info("Wrote compact HTML to %s (%d chars)", output_path, len(compact))
     return compact
+
+
+def count_unresolved_images(html_path: str | Path) -> int:
+    """Count <img> tags that are not data URIs and point to a missing local file."""
+    html_path = Path(html_path).resolve()
+    html_dir = str(html_path.parent)
+    raw_bytes = html_path.read_bytes()
+    source = raw_bytes.decode(detect_encoding(raw_bytes), errors="replace")
+    soup = BeautifulSoup(source, "html.parser")
+    missing = 0
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if _is_data_uri(src):
+            continue
+        if not _resolve_image_src(src, html_dir):
+            missing += 1
+    return missing
