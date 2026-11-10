@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import operator
 import re
 from typing import Annotated, Any, NotRequired, TypedDict
@@ -41,6 +42,8 @@ from .prompts import (
     GROUPED_DOMAIN_ANALYST_PROMPT,
     CROSS_REFERENCE_PROMPT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -195,6 +198,36 @@ def _normalise_finding_ids(
     )
 
 
+_CORE_REFERENCE = "core-analysis"
+_COMPAT_INDEX_REFERENCES = {"thresholds", "remediation-patterns"}
+
+
+def _normalize_reference_ids(
+    registry: SkillRegistry,
+    skill_name: str | None,
+    ids: list[str] | None,
+    section_text: str,
+) -> list[str]:
+    """Clean the planner's reference list: known ids only, core-analysis first, no duplicates."""
+    skill = (skill_name or "").strip()
+    all_ids = registry.reference_ids(skill)
+    if not all_ids:
+        return []
+    valid = set(all_ids) - _COMPAT_INDEX_REFERENCES
+    cleaned = [str(i).strip().lower() for i in (ids or []) if i and str(i).strip()]
+    unknown = [i for i in cleaned if i not in valid and i not in _COMPAT_INDEX_REFERENCES]
+    if unknown:
+        logger.warning("Planner chose unknown reference ids for skill %s: %s", skill, ", ".join(unknown))
+    kept = [i for i in cleaned if i in valid]
+    if not kept:
+        kept = [i for i in registry.suggest_references(skill, section_text) if i in valid]
+    result: list[str] = []
+    for ref_id in ([_CORE_REFERENCE] if _CORE_REFERENCE in valid else []) + kept:
+        if ref_id not in result:
+            result.append(ref_id)
+    return result
+
+
 def _normalise_section_tasks(
     tasks: list[dict],
     sections_available: list[dict],
@@ -275,10 +308,16 @@ def build_ewa_graph(
             context, context_ids = parent_context(task["section_ids"], state["sections_available"],
                 state["context_sections"], config.max_parent_context_chars)
             task["parent_context"] = context
+            section_text = " ".join([task["section_title"], task["analysis_focus"], *[
+                next((s["title"] for s in state["sections_available"] if s["id"] == sid), "") + " "
+                + state["sections_content"].get(sid, "")[:100] for sid in task["section_ids"]]])
+            task["reference_ids"] = _normalize_reference_ids(
+                skill_registry, task["skill_name"], task.get("reference_ids"), section_text)
             records.append(AnalysisTaskRecord(task_id=task["task_id"], title=task["section_title"],
                 source_section_ids=task["section_ids"], context_section_ids=context_ids,
                 source_content_chars=task["source_content_chars"], context_content_chars=len(context),
-                origin=task["task_origin"], within_budget=not task["oversized"]))
+                origin=task["task_origin"], within_budget=not task["oversized"],
+                reference_ids=task["reference_ids"]))
         return {"section_tasks": tasks, "analysis_tasks": records,
                 "planning_notes": " ".join([plan.planning_notes if plan else "", *notes]).strip()}
 
@@ -319,7 +358,8 @@ def build_ewa_graph(
                     system_profile=profile_text)
                 chain = grouped_chain
             if task["parent_context"]:
-                prompt += "\n\nSupplementary parent context (excerpts; not owned source sections):\n" + task["parent_context"]
+                prompt += ("\n\n<parent_context>\nSupplementary parent context (excerpts; not owned source sections):\n"
+                           + task["parent_context"] + "\n</parent_context>")
             try:
                 result = chain.invoke([HumanMessage(content=prompt)])
                 inp, out, cached, cache_write = _tokens(result.get("raw"))

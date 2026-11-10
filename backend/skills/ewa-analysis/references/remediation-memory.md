@@ -9,7 +9,10 @@ Actions:
 
 - Use `AL05` and `SM04` to identify high-memory users and sessions.
 - Use `SM50` to check PRIV mode work processes.
-- Increase `em/initial_size_MB` in `RZ10` after validating host memory headroom.
+- Newer kernels derive memory settings automatically (`PHYS_MEMSIZE` / automatic
+  memory configuration). Check the current SAP default for the kernel release
+  before changing anything. Raise `em/initial_size_MB` in `RZ10` only if still
+  justified, after validating host memory headroom.
 - Review `em/max_size_MB`, `ztta/roll_area`, and `abap/heap_area_*` for related
   limits.
 - Coordinate restart if profile parameters require it.

@@ -182,6 +182,7 @@ class CLIAnalysisSettingsTests(unittest.TestCase):
         registry = Mock()
         registry.catalog_text.return_value = "Synthetic skill catalog"
         registry.suggest_references.return_value = []
+        registry.reference_ids.return_value = []
         registry.resolve_context.return_value = "Synthetic context"
         parsed = (
             OrchestratorPlan(tasks=[{"section_ids": ["0001"], "section_title": "Synthetic",

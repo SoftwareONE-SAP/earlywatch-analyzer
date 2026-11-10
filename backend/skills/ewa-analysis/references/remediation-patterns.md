@@ -6,6 +6,7 @@ smaller remediation references for lazy loading:
 - `remediation-performance`
 - `remediation-memory`
 - `remediation-database`
+- `remediation-sql`
 - `remediation-hana`
 - `remediation-batch`
 - `remediation-security`

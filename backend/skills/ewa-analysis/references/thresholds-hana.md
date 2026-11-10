@@ -4,6 +4,9 @@ Use this reference for HANA stability and alerts, service restarts, availability
 configuration, persistence, resource consumption, row/column store, delta merge,
 backup, diagnosis files, statistics server, and important-note sections.
 
+For individual expensive SQL statements, plan cache, or top statements, use
+`thresholds-sql` instead.
+
 ## Assessment Rules
 
 - Preserve the HANA alert ID, rating, affected host/service, first and last

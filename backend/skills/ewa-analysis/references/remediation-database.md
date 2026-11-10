@@ -7,8 +7,7 @@ Actions:
 - Use `ST03N` to confirm workload impact and affected task types.
 - Use `ST04` or `DBACOCKPIT` to inspect wait events, cache hit ratios, and
   expensive statements.
-- Use `ST05` or SQL Monitor for suspect custom transactions.
-- Tune SQL or indexes when one statement dominates elapsed time.
+- For individual expensive statements, follow `remediation-sql`.
 - Increase DB buffer/memory only when cache evidence supports sizing as root
   cause.
 

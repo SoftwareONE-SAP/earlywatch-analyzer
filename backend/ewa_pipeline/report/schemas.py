@@ -109,6 +109,7 @@ class AnalysisTaskRecord(BaseModel):
     context_content_chars: int = 0
     origin: str
     within_budget: bool = True
+    reference_ids: list[str] = Field(default_factory=list)
 
 
 class SectionCoverage(BaseModel):

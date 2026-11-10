@@ -2,7 +2,8 @@
 
 Use this reference for EWA sections about ABAP and HANA users, authorizations,
 default passwords, audit policy, RFC and message-server exposure, HANA network
-settings, kernel age, support packages, and security configuration.
+settings, and security configuration. Kernel and support package currency is
+in `thresholds-lifecycle`.
 
 | Metric | Healthy | Warning | Critical | Transactions | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -10,8 +11,6 @@ settings, kernel age, support packages, and security configuration.
 | Default passwords unchanged | 0 | Any | Direct exposure | RSUSR003 | Well-known credentials are high risk |
 | RFC destinations without authentication | 0 | Any | External/open exposure | SM59 | Can enable lateral movement |
 | Password policy violations | 0 | Any | Widespread weak policy | RZ10, SU01 | Usually High in production |
-| Kernel patch level age | < 6 months | 6-12 months | > 12 months | SM51 | Old kernels miss fixes |
-| Support package age | < 12 months | 12-24 months | > 24 months | SPAM | Old SPs increase maintenance and compliance risk |
 | Locked/obsolete users active | 0 | Any | Privileged obsolete users | SUIM | Review ownership and validity |
 
 ## HANA-Specific Assessment
@@ -36,6 +35,9 @@ settings, kernel age, support packages, and security configuration.
 Severity guidance:
 
 - Security findings default to High in production unless clearly informational.
+- Any user with SAP_ALL or SAP_NEW in production, and any unchanged default
+  password for standard users (`SAP*`, `DDIC`, `EARLYWATCH`, `TMSADM`,
+  `SAPCPIC`), defaults to High unless the report rates it lower.
 - Critical requires immediate exposure, active compromise indicator, or broad
   privileged access with exploitable external paths.
 - Medium can apply to patch currency issues without current exposure.

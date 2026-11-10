@@ -122,6 +122,8 @@ class GroupedWebPipelineTests(unittest.TestCase):
             self.assertEqual(len(result.analysis_tasks), 1)
             self.assertEqual(result.analysis_tasks[0].source_section_ids, ["0002", "0003"])
             self.assertEqual(result.analysis_tasks[0].context_section_ids, ["0001"])
+            self.assertTrue(result.analysis_tasks[0].reference_ids)
+            self.assertEqual(result.analysis_tasks[0].reference_ids[0], "core-analysis")
             grouped = [prompt for schema, prompt in calls if schema is GroupedDomainAnalysis]
             self.assertEqual(len(grouped), 1)
             self.assertIn("A123", grouped[0])

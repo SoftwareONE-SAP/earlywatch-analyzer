@@ -7,6 +7,7 @@ smaller domain references for lazy loading:
 - `thresholds-hana`
 - `thresholds-memory`
 - `thresholds-database`
+- `thresholds-sql`
 - `thresholds-batch`
 - `thresholds-security`
 - `thresholds-operations`
