@@ -14,6 +14,8 @@ Actions:
 
 Actions:
 
+- ICM technical errors (threads, connection errors) are in
+  `remediation-operations`.
 - Use `SMGW`, `SMMS`, `SMICM`, and current SAP guidance to validate exposure,
   ACL behavior, logs, certificates, and profile settings.
 - Build least-privilege `reginfo`/`secinfo` rules from observed required traffic,

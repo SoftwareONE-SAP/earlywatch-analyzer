@@ -6,8 +6,10 @@ Actions:
 
 - Use SAP HANA cockpit, `DBACOCKPIT`, or Database Explorer to confirm the exact
   alert history, service event, host, and observation window.
-- Correlate with diagnosis files, OOM events, expensive statements, savepoints,
-  merges, backups, and infrastructure events before assigning a root cause.
+- Correlate with diagnosis files, OOM events, savepoints, merges, backups, and
+  infrastructure events before assigning a root cause.
+- For individual expensive SQL statements, plan cache, or top statements, use
+  `remediation-sql` instead.
 - Contain a current capacity risk through approved workload controls or space
   extension; do not change HANA parameters from a generic threshold.
 - Validate any parameter or revision action against current SAP Help and the

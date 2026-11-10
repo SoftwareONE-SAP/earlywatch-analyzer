@@ -5,7 +5,8 @@
 Actions:
 
 - Use `ST22` to group dumps by type, program, user, and time window.
-- Use `SM21` to correlate dumps with system log errors and restarts.
+- Use `SM21` to correlate dumps with system log errors. For restarts, follow
+  `remediation-continuity`.
 - For custom code dumps, assign to the owning development team with exact dump
   name, program, include, and timestamp.
 - For standard SAP dumps, search SAP Notes by dump name, component, and release.
@@ -39,7 +40,7 @@ Effort: Medium. Priority: Immediate if production consistency is affected.
 Actions:
 
 - Use `SMICM` to inspect connection errors, thread usage, and HTTP response
-  health.
+  health. For ICM as an interface channel, see `remediation-integration`.
 - Check certificates, profile parameters, reverse proxy, and backend endpoint
   availability.
 - Increase ICM capacity only after confirming traffic demand and host headroom.

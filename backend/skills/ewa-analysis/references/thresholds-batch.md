@@ -7,7 +7,7 @@ contention.
 | Metric | Healthy | Warning | Critical | Transactions | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Failed jobs as percent of total | < 1% | 1-5% | > 5% | SM37 | Failed jobs can mean failed business processes |
-| Long-running jobs | 0 | 1-3 | > 3 | SM37 | Long jobs hold work processes and delay chains |
+| Long-running jobs | 0 | 1-3 | > 3 | SM37 | Long = well above the job's own normal runtime, or flagged by the report; holds work processes and delays chains |
 | Background WP utilization | < 70% | 70-90% | > 90% | SM50, SM66 | Near saturation means new jobs queue |
 | Jobs delayed past scheduled start | < 5 min | 5-30 min | > 30 min | SM37 | Indicates scheduling or capacity contention |
 | Cancelled critical jobs | 0 | 1 | > 1 | SM37 | Severity depends on business function |

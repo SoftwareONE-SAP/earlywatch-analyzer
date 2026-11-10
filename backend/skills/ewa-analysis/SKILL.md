@@ -22,7 +22,8 @@ when the section contains independent evidence from that second domain.
 <routing>
 - `performance`: workload, response time, CPU, swap, hardware, and sizing
 - `memory`: SAP memory, heap, roll, extended memory, and buffers
-- `database`: database time, SQL, cache, tablespaces, and non-HANA DB health
+- `database`: non-HANA database time, cache, tablespaces, and DB health
+- `sql`: expensive/top SQL statements, statement hashes, plan cache, thread distribution, known issues, missing indexes
 - `hana`: HANA services, alerts, persistence, memory, backup, and recovery
 - `batch`: background jobs, scheduling, work processes, and contention
 - `security`: users, privileges, passwords, audit, RFC exposure, and HANA security

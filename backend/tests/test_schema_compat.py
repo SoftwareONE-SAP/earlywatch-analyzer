@@ -80,6 +80,15 @@ class SchemaCompatTests(unittest.TestCase):
         self.assertIsNone(result.system_profile)
         self.assertIsNone(result.sap_summary)
 
+    def test_old_task_record_without_reference_ids_loads_with_empty_list(self):
+        payload = old_payload()
+        payload["analysis_tasks"] = [{
+            "task_id": "T1", "title": "Task", "source_section_ids": ["0001"],
+            "source_content_chars": 10, "origin": "planner",
+        }]
+        result = AnalysisResult.model_validate(payload)
+        self.assertEqual(result.analysis_tasks[0].reference_ids, [])
+
     def test_old_payload_loads_from_json_string_with_defaults(self):
         result = AnalysisResult.model_validate_json(json.dumps(old_payload()))
         self.assert_defaults(result.domain_analyses[0].findings[0])

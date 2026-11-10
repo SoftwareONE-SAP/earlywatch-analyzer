@@ -16,6 +16,9 @@ important SAP Note sections.
   controls.
 - Do not invent the latest level, deadline, compatibility, CVE applicability, or
   SAP Note. These facts are time- and release-specific.
+- Age of kernel or support packages: prefer the report's own rating. If it gives
+  none, treat age only as a rough guide to validate against SAP maintenance
+  information, never as a fixed limit.
 - Treat an EWA important-note list as candidates for applicability validation,
   not automatic implementation instructions.
 
