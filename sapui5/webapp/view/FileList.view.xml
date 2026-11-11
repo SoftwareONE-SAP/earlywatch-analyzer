@@ -237,6 +237,13 @@
                                         class="sapUiTinyMarginBegin"
                                         visible="{= (${files>status} === 'Analyzed' || ${files>status} === 'completed') &amp;&amp; ${files>hasExplorer} === true }"/>
                                     <Button
+                                        tooltip="Download interactive report"
+                                        icon="sap-icon://download"
+                                        type="Transparent"
+                                        press=".onDownloadExplorerPress"
+                                        class="sapUiTinyMarginBegin"
+                                        visible="{= (${files>status} === 'Analyzed' || ${files>status} === 'completed') &amp;&amp; ${files>hasExplorer} === true }"/>
+                                    <Button
                                         tooltip="{i18n>process}"
                                         icon="sap-icon://activate"
                                         type="Transparent"

@@ -614,6 +614,13 @@ sap.ui.define([
             window.open(Config.getDownloadUrl(sExplorerName), "_blank");
         },
 
+        onDownloadExplorerPress: function (oEvent) {
+            var oItem = oEvent.getSource().getBindingContext("files").getObject();
+            var sBaseName = oItem.name.replace(/\.(doc|html?)$/i, "");
+            var sExplorerName = sBaseName + "_explorer.html";
+            window.open(Config.getDownloadUrl(sExplorerName) + "?download=1", "_blank");
+        },
+
         onChatPress: function (oEvent) {
             var oItem = oEvent.getSource().getBindingContext("files").getObject();
             var sUrl = window.location.origin + "/chat.html?fileName=" + encodeURIComponent(oItem.name);
