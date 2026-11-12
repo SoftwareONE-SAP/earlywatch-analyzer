@@ -532,9 +532,13 @@ async def delete_analysis(
 @router.get("/download/{blob_name}")
 async def download_file(
     blob_name: str,
+    download: bool = False,
     _user: dict = Depends(require_auth()),
 ):
-    """Download a file from Azure Blob Storage."""
+    """Download a file from Azure Blob Storage.
+
+    Pass ?download=1 to force "attachment" (save) for any file type.
+    """
 
     try:
         if not blob_service_client:
@@ -569,7 +573,10 @@ async def download_file(
         if blob_name.endswith(".xlsx"):
             content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        disposition = "attachment" if blob_name.endswith(".xlsx") else "inline"
+        if download:
+            disposition = "attachment"
+        else:
+            disposition = "attachment" if blob_name.endswith(".xlsx") else "inline"
 
         headers = {"Content-Disposition": f"{disposition}; filename=\"{blob_name}\""}
         if blob_name.endswith("_explorer.html"):

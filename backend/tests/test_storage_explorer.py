@@ -55,6 +55,17 @@ class ExplorerStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.headers["content-type"].startswith("text/html"))
         self.assertTrue(response.headers["content-disposition"].startswith("inline"))
 
+    async def test_download_explorer_with_download_flag_is_attachment(self):
+        with patch.object(storage_router, "blob_service_client", Mock()), \
+                patch.object(storage_router.storage_service, "get_text_content",
+                             return_value="<html></html>"):
+            response = await storage_router.download_file(
+                "A_explorer.html", download=True, _user={})
+        self.assertTrue(response.headers["content-disposition"].startswith("attachment"))
+        self.assertIn("sandbox", response.headers["content-security-policy"])
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+
     async def test_download_other_file_has_no_csp(self):
         with patch.object(storage_router, "blob_service_client", Mock()), \
                 patch.object(storage_router.storage_service, "get_bytes", return_value=b"x"):
